@@ -337,7 +337,7 @@ impl FrameRoot {
         let name = self.settings_ui.preset_name_draft.trim();
         if name.is_empty() {
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: "Name required".to_string(),
+                text: "请填写预设名称".to_string(),
                 tone: PresetNoticeTone::Error,
             });
             return false;
@@ -345,7 +345,7 @@ impl FrameRoot {
 
         let Some(config) = self.selected_config().cloned() else {
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: "Preset not saved".to_string(),
+                text: "预设未保存".to_string(),
                 tone: PresetNoticeTone::Error,
             });
             return false;
@@ -356,7 +356,7 @@ impl FrameRoot {
         if let Err(error) = self.persist_app_settings() {
             self.presets.pop();
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: format!("Preset not saved: {error}"),
+                text: format!("预设未保存：{error}"),
                 tone: PresetNoticeTone::Error,
             });
             return false;
@@ -365,7 +365,7 @@ impl FrameRoot {
         self.settings_ui.next_custom_preset_sequence = next_sequence;
         self.settings_ui.preset_name_draft.clear();
         self.settings_ui.preset_notice = Some(PresetNotice {
-            text: "Preset saved".to_string(),
+            text: "预设已保存".to_string(),
             tone: PresetNoticeTone::Success,
         });
         true
@@ -381,7 +381,7 @@ impl FrameRoot {
             .position(|preset| preset.id == preset_id && !preset.built_in)
         else {
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: "Unable to delete".to_string(),
+                text: "无法删除".to_string(),
                 tone: PresetNoticeTone::Error,
             });
             return false;
@@ -391,14 +391,14 @@ impl FrameRoot {
         if let Err(error) = self.persist_app_settings() {
             self.presets.insert(index, removed);
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: format!("Unable to delete: {error}"),
+                text: format!("无法删除：{error}"),
                 tone: PresetNoticeTone::Error,
             });
             return false;
         }
 
         self.settings_ui.preset_notice = Some(PresetNotice {
-            text: "Preset removed".to_string(),
+            text: "预设已删除".to_string(),
             tone: PresetNoticeTone::Success,
         });
         true
@@ -424,7 +424,7 @@ impl FrameRoot {
             self.update_selected_config(|config| apply_preset(config, &preset, metadata.as_ref()));
         if changed {
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: format!("Applied {}", preset.name),
+                text: format!("已应用“{}”", preset.name),
                 tone: PresetNoticeTone::Success,
             });
         }
@@ -450,14 +450,14 @@ impl FrameRoot {
         };
 
         let detail = format!(
-            "This will apply \"{}\" to all pending files in the queue. Existing settings will be overwritten.",
+            "这将把“{}”应用到队列中所有待处理文件。现有设置将被覆盖。",
             preset.name
         );
         let receiver = window.prompt(
             PromptLevel::Warning,
-            "Apply to all?",
+            "应用到全部？",
             Some(&detail),
-            &[PromptButton::ok("Apply"), PromptButton::cancel("Cancel")],
+            &[PromptButton::ok("应用"), PromptButton::cancel("取消")],
             cx,
         );
 
@@ -499,7 +499,7 @@ impl FrameRoot {
 
         if changed {
             self.settings_ui.preset_notice = Some(PresetNotice {
-                text: "Applied to all items".to_string(),
+                text: "已应用到所有文件".to_string(),
                 tone: PresetNoticeTone::Success,
             });
         }
