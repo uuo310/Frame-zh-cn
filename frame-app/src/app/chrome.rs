@@ -10,6 +10,7 @@ use super::components::{
     frame_vertical_scrollbar,
 };
 use super::input::{FrameTextInputSpec, frame_text_input};
+use super::preset_menu::{PresetMenuUi, titlebar_preset_area};
 use super::primitives::{
     ButtonColors, ButtonVariant, action_button, animated_button_colors, apply_button_motion,
     button_colors, button_highlight_shadows, button_motion, card_surface_shadows, color, icon_svg,
@@ -66,29 +67,39 @@ impl FrameTitlebarPlatform {
 
 pub(super) fn titlebar(
     state: FrameAppState,
+    preset: &PresetMenuUi,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    titlebar_for_platform(FrameTitlebarPlatform::current(), state, palette, window, cx)
+    titlebar_for_platform(
+        FrameTitlebarPlatform::current(),
+        state,
+        preset,
+        palette,
+        window,
+        cx,
+    )
 }
 
 pub(super) fn titlebar_for_platform(
     platform: FrameTitlebarPlatform,
     state: FrameAppState,
+    preset: &PresetMenuUi,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     match platform {
-        FrameTitlebarPlatform::Macos => macos_titlebar(state, palette, window, cx),
-        FrameTitlebarPlatform::Windows => windows_titlebar(state, palette, window, cx),
-        FrameTitlebarPlatform::Linux => linux_titlebar(state, palette, window, cx),
+        FrameTitlebarPlatform::Macos => macos_titlebar(state, preset, palette, window, cx),
+        FrameTitlebarPlatform::Windows => windows_titlebar(state, preset, palette, window, cx),
+        FrameTitlebarPlatform::Linux => linux_titlebar(state, preset, palette, window, cx),
     }
 }
 
 pub(super) fn macos_titlebar(
     state: FrameAppState,
+    preset: &PresetMenuUi,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
@@ -126,8 +137,8 @@ pub(super) fn macos_titlebar(
                 .mt_2()
                 .gap_2()
                 .when(show_workspace_controls, |this| {
-                    this.child(titlebar_settings_button(palette, window, cx))
-                        .child(titlebar_add_source_button(palette, window, cx))
+                    this.child(titlebar_preset_area(preset, palette, window, cx))
+                        .child(titlebar_settings_button(palette, window, cx))
                         .child(titlebar_start_button(state, palette, window, cx))
                 }),
         )
@@ -135,6 +146,7 @@ pub(super) fn macos_titlebar(
 
 pub(super) fn windows_titlebar(
     state: FrameAppState,
+    preset: &PresetMenuUi,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
@@ -145,12 +157,13 @@ pub(super) fn windows_titlebar(
         .w_full()
         .flex_none()
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-        .child(platform_titlebar_content(state, palette, window, cx))
+        .child(platform_titlebar_content(state, preset, palette, window, cx))
         .child(windows_window_controls(palette, window, cx))
 }
 
 pub(super) fn linux_titlebar(
     state: FrameAppState,
+    preset: &PresetMenuUi,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
@@ -161,7 +174,7 @@ pub(super) fn linux_titlebar(
         .w_full()
         .flex_none()
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-        .child(platform_titlebar_content(state, palette, window, cx))
+        .child(platform_titlebar_content(state, preset, palette, window, cx))
         .child(linux_window_controls(palette, window, cx))
 }
 
@@ -193,6 +206,7 @@ fn titlebar_drag_surface(cx: &Context<FrameRoot>) -> gpui::Div {
 
 pub(super) fn platform_titlebar_content(
     state: FrameAppState,
+    preset: &PresetMenuUi,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
@@ -235,8 +249,8 @@ pub(super) fn platform_titlebar_content(
                         .items_center()
                         .gap_2()
                         .when(show_workspace_controls, |this| {
-                            this.child(titlebar_settings_button(palette, window, cx))
-                                .child(titlebar_add_source_button(palette, window, cx))
+                            this.child(titlebar_preset_area(preset, palette, window, cx))
+                                .child(titlebar_settings_button(palette, window, cx))
                                 .child(titlebar_start_button(state, palette, window, cx))
                         }),
                 ),
@@ -270,28 +284,6 @@ pub(super) fn titlebar_settings_button(
             root.open_app_settings();
         }
         cx.notify();
-    }))
-}
-
-pub(super) fn titlebar_add_source_button(
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> impl IntoElement {
-    action_button(
-        "titlebar-add-source",
-        assets::ICON_PLUS,
-        Some("添加源"),
-        "添加源",
-        ButtonVariant::Secondary,
-        true,
-        palette,
-        window,
-        cx,
-    )
-    .on_click(cx.listener(|_root, _: &ClickEvent, window, cx| {
-        cx.stop_propagation();
-        FrameRoot::prompt_add_source(window, cx);
     }))
 }
 

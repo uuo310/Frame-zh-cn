@@ -60,7 +60,6 @@ impl FrameRoot {
             Some(VisualFixture::SettingsImages) => self.apply_settings_images_fixture(),
             Some(VisualFixture::SettingsMetadata) => self.apply_settings_metadata_fixture(),
             Some(VisualFixture::SettingsOutput) => self.apply_settings_output_fixture(),
-            Some(VisualFixture::SettingsPresets) => self.apply_settings_presets_fixture(),
             Some(VisualFixture::SettingsSource) => self.apply_settings_source_fixture(),
             Some(VisualFixture::SettingsSubtitles) => self.apply_settings_subtitles_fixture(),
             Some(VisualFixture::SettingsSubtitlesPopover) => {
@@ -390,25 +389,6 @@ impl FrameRoot {
         self.subtitle_ui.font_color_draft = "#FFD166".to_string();
         self.subtitle_ui.font_color_hsv_draft = settings_panel::hex_to_subtitle_hsv("#ffd166");
     }
-    pub(super) fn apply_settings_presets_fixture(&mut self) {
-        self.apply_preview_ready_fixture();
-        self.settings_ui.active_tab = SettingsTab::Presets;
-        self.settings_ui.preset_name_draft = "Client Review MP4".to_string();
-        self.presets.push(PresetDefinition::custom(
-            "custom-review".to_string(),
-            "Client Review MP4".to_string(),
-            ConversionConfig {
-                video_bitrate_mode: "bitrate".to_string(),
-                video_bitrate: "7500".to_string(),
-                audio_bitrate: "192".to_string(),
-                audio_channels: "stereo".to_string(),
-                resolution: "1080p".to_string(),
-                preset: "fast".to_string(),
-                ..ConversionConfig::default()
-            },
-        ));
-    }
-
     fn seed_audio_source_fixture(&mut self) {
         self.active_view = ActiveView::Workspace;
         self.file_queue.add_file(FileItem::from_path(

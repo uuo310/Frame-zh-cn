@@ -40,8 +40,7 @@ pub fn visible_settings_tabs(
             SettingsTab::Subtitles => supports_subtitles,
             SettingsTab::Source
             | SettingsTab::Output
-            | SettingsTab::Metadata
-            | SettingsTab::Presets => true,
+            | SettingsTab::Metadata => true,
         })
         .collect()
 }

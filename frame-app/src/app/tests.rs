@@ -3940,20 +3940,6 @@ mod visual_fixtures {
         assert_eq!(root.subtitle_ui.font_color_draft, "#FFD166");
     }
 
-    #[test]
-    fn settings_presets_fixture_opens_presets_tab_with_custom_draft() {
-        let mut root = FrameRoot::new();
-
-        root.apply_visual_fixture(Some(VisualFixture::SettingsPresets));
-
-        assert_eq!(root.settings_ui.active_tab, SettingsTab::Presets);
-        assert_eq!(root.settings_ui.preset_name_draft, "Client Review MP4");
-        assert!(
-            root.presets
-                .iter()
-                .any(|preset| preset.id == "custom-review")
-        );
-    }
 }
 
 mod surface_highlights {

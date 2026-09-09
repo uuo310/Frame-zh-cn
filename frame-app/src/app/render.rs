@@ -590,7 +590,7 @@ impl Render for FrameRoot {
                     }
                 },
             ))
-            .child(titlebar(state, palette, window, cx))
+            .child(titlebar(state, &self.preset_menu_ui(), palette, window, cx))
             .child(content)
             .child(FileDropLifecycleProbe { owner: cx.entity() });
 

@@ -60,7 +60,6 @@ pub enum SettingsTab {
     AudioFilters,
     Subtitles,
     Metadata,
-    Presets,
 }
 
 impl SettingsTab {
@@ -76,7 +75,6 @@ impl SettingsTab {
             Self::AudioFilters => "音频滤镜",
             Self::Subtitles => "字幕",
             Self::Metadata => "元数据",
-            Self::Presets => "预设",
         }
     }
 
@@ -92,12 +90,11 @@ impl SettingsTab {
             Self::AudioFilters => "audio-filters",
             Self::Subtitles => "subtitles",
             Self::Metadata => "metadata",
-            Self::Presets => "presets",
         }
     }
 }
 
-pub const ALL_SETTINGS_TABS: [SettingsTab; 10] = [
+pub const ALL_SETTINGS_TABS: [SettingsTab; 9] = [
     SettingsTab::Source,
     SettingsTab::Output,
     SettingsTab::Video,
@@ -107,7 +104,6 @@ pub const ALL_SETTINGS_TABS: [SettingsTab; 10] = [
     SettingsTab::AudioFilters,
     SettingsTab::Subtitles,
     SettingsTab::Metadata,
-    SettingsTab::Presets,
 ];
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

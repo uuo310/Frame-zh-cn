@@ -2144,8 +2144,7 @@ mod visible_settings_tabs {
                 "audio",
                 "audio-filters",
                 "subtitles",
-                "metadata",
-                "presets"
+                "metadata"
             ]
         );
     }
@@ -2172,8 +2171,7 @@ mod visible_settings_tabs {
                 "output",
                 "audio",
                 "audio-filters",
-                "metadata",
-                "presets"
+                "metadata"
             ]
         );
     }
@@ -2200,8 +2198,7 @@ mod visible_settings_tabs {
                 "output",
                 "video-filters",
                 "images",
-                "metadata",
-                "presets"
+                "metadata"
             ]
         );
     }
@@ -2221,8 +2218,7 @@ mod visible_settings_tabs {
                 "output",
                 "audio",
                 "subtitles",
-                "metadata",
-                "presets"
+                "metadata"
             ]
         );
     }

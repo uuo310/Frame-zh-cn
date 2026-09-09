@@ -152,15 +152,57 @@ impl FrameRoot {
         &mut self,
         update: impl FnOnce(&mut ConversionConfig) -> bool,
     ) -> bool {
+        self.update_selected_config_inner(update, true)
+    }
+
+    /// Mutate the selected config without recording a custom snapshot. Used by non-manual
+    /// paths (preset application, normalization) so they never overwrite a suspended Custom
+    /// Work State.
+    pub(super) fn update_selected_config_preserve_snapshot(
+        &mut self,
+        update: impl FnOnce(&mut ConversionConfig) -> bool,
+    ) -> bool {
+        self.update_selected_config_inner(update, false)
+    }
+
+    fn update_selected_config_inner(
+        &mut self,
+        update: impl FnOnce(&mut ConversionConfig) -> bool,
+        record_snapshot: bool,
+    ) -> bool {
         if self.update_installation_in_progress() {
             return false;
         }
-        self.file_queue
-            .selected_file_mut()
-            .is_some_and(|file| update(&mut file.config))
+        self.file_queue.selected_file_mut().is_some_and(|file| {
+            let changed = update(&mut file.config);
+            if changed && record_snapshot {
+                file.custom_snapshot = Some(file.config.clone());
+            }
+            changed
+        })
     }
+
+    /// Restore the selected file's suspended Custom Work State (config := snapshot).
+    pub(super) fn restore_custom_snapshot(&mut self) -> bool {
+        if self.update_installation_in_progress() {
+            return false;
+        }
+        self.file_queue.selected_file_mut().is_some_and(|file| {
+            let Some(snapshot) = file.custom_snapshot.clone() else {
+                return false;
+            };
+            if file.config == snapshot {
+                return false;
+            }
+            file.config = snapshot;
+            true
+        })
+    }
+
     pub(super) fn normalize_selected_config(&mut self, metadata: Option<&SourceMetadata>) -> bool {
-        self.update_selected_config(|config| normalize_output_config(config, metadata))
+        self.update_selected_config_preserve_snapshot(|config| {
+            normalize_output_config(config, metadata)
+        })
     }
 
     pub(super) fn persist_app_settings(

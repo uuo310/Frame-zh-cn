@@ -76,7 +76,6 @@ pub(in crate::app) const fn settings_tab_icon(tab: SettingsTab) -> &'static str 
         SettingsTab::AudioFilters => assets::ICON_AUDIO_FILTERS,
         SettingsTab::Subtitles => assets::ICON_CAPTIONS,
         SettingsTab::Metadata => assets::ICON_TAGS,
-        SettingsTab::Presets => assets::ICON_BOOKMARK,
     }
 }
 

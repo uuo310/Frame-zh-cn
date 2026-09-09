@@ -12,6 +12,7 @@ mod metadata;
 mod motion;
 mod preview_actions;
 mod preview_panel;
+mod preset_menu;
 mod primitives;
 mod render;
 mod runtime;
@@ -112,7 +113,7 @@ use crate::{
     settings::{
         ConversionConfig, CropSettings, DEFAULT_SUBTITLE_FONT_COLOR,
         DEFAULT_SUBTITLE_OUTLINE_COLOR, MetadataField, OverlaySettings, PresetDefinition,
-        PresetNotice, PresetNoticeTone, PresetOption, ProcessingMode, SettingsTab,
+        PresetNotice, PresetNoticeTone, ProcessingMode, SettingsTab,
         SourceInfoSection, SourceKind, SourceMetadata, SourceTags, SubtitleFontOption,
         SubtitleFontSizeOption, add_external_subtitle_tracks, apply_audio_bitrate,
         apply_audio_bitrate_mode, apply_audio_channels, apply_audio_codec, apply_audio_normalize,
@@ -323,6 +324,9 @@ struct SettingsUiState {
     preset_name_draft: String,
     preset_notice: Option<PresetNotice>,
     next_custom_preset_sequence: u64,
+    preset_menu_popover: PopoverState,
+    preset_menu_edit_mode: bool,
+    preset_menu_naming: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -426,6 +430,9 @@ impl Default for SettingsUiState {
             preset_name_draft: String::new(),
             preset_notice: None,
             next_custom_preset_sequence: 0,
+            preset_menu_popover: PopoverState::Hidden,
+            preset_menu_edit_mode: false,
+            preset_menu_naming: false,
         }
     }
 }

@@ -19,6 +19,9 @@ pub struct FileItem {
     pub original_format: String,
     pub output_name: String,
     pub config: ConversionConfig,
+    /// Session-only snapshot of the most recent manual (non-preset) edit, powering the
+    /// Custom Work State machine. Never persisted: `FileItem` is not serialized.
+    pub custom_snapshot: Option<ConversionConfig>,
     pub path: String,
     pub is_selected_for_conversion: bool,
     pub conversion_error: Option<String>,
@@ -34,6 +37,7 @@ impl FileItem {
             original_format: original_format_from_name(&name).to_string(),
             output_name: derive_output_name(&name),
             config: ConversionConfig::default(),
+            custom_snapshot: None,
             name,
             size_bytes,
             status: FileStatus::Idle,

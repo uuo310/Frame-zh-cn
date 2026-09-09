@@ -13,7 +13,7 @@ use super::{
         frame_vertical_uniform_scrollbar,
     },
     primitives::{
-        FrameSurface, button_mouse_down, color, drop_target_shadows, element_id,
+        FrameSurface, button_mouse_down, color, drop_target_shadows, element_id, icon_svg,
         panel_bottom_separator,
     },
 };
@@ -119,7 +119,13 @@ pub(super) fn file_list_header(
                         .items_center()
                         .child(header_checkbox),
                 )
-                .child(header_label("名称", 5, false))
+                .child(
+                    div()
+                        .col_span(5)
+                        .flex()
+                        .items_center()
+                        .child(file_list_add_source_button(palette, cx)),
+                )
                 .child(header_label("大小", 2, true))
                 .child(header_label("目标", 2, true))
                 .child(header_label("状态", 2, true)),
@@ -153,16 +159,7 @@ pub(super) fn file_list_body(
         .flex_col()
         .overflow_hidden();
     if queue.files().is_empty() {
-        return body.child(
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-                .text_color(color(palette.text_muted))
-                .child(theme::ui_text("拖放文件，或点击“添加源”")),
-        );
+        return body;
     }
 
     let file_count = queue.files().len();
@@ -291,6 +288,36 @@ pub(super) fn file_list_row(
             cx,
         ))
         .child(panel_bottom_separator(palette))
+}
+
+fn file_list_add_source_button(
+    palette: &'static theme::ThemePalette,
+    cx: &Context<FrameRoot>,
+) -> gpui::Stateful<gpui::Div> {
+    div()
+        .id("file-list-add-source")
+        .role(gpui::Role::Button)
+        .aria_label("添加源")
+        .flex()
+        .items_center()
+        .justify_center()
+        .w(theme::ui_rem(FILE_LIST_ACTION_BUTTON_SIZE))
+        .h(theme::ui_rem(FILE_LIST_ACTION_BUTTON_SIZE))
+        .rounded(theme::ui_rem(theme::RADIUS_SM))
+        .hover(|style| {
+            style
+                .bg(color(palette.fill_subtle))
+                .cursor_pointer()
+        })
+        .child(icon_svg(
+            assets::ICON_PLUS,
+            FILE_LIST_ACTION_ICON_SIZE,
+            color(palette.text_muted),
+        ))
+        .on_click(cx.listener(|_root, _: &ClickEvent, window, cx| {
+            cx.stop_propagation();
+            FrameRoot::prompt_add_source(window, cx);
+        }))
 }
 
 pub(super) fn header_label(label: &'static str, span: u16, align_right: bool) -> gpui::Div {

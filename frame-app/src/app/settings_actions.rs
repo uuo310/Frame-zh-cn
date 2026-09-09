@@ -397,6 +397,16 @@ impl FrameRoot {
             return false;
         }
 
+        // Orphan rule: deleting the preset the selected file currently applies must not lose
+        // that config — solidify it as the file's Custom Work State.
+        if let Some(file) = self.file_queue.selected_file_mut() {
+            let matched_removed = crate::settings::configs_match(&file.config, &removed.config);
+            let snapshot_is_current = file.custom_snapshot.as_ref() == Some(&file.config);
+            if matched_removed && !snapshot_is_current {
+                file.custom_snapshot = Some(file.config.clone());
+            }
+        }
+
         self.settings_ui.preset_notice = Some(PresetNotice {
             text: "预设已删除".to_string(),
             tone: PresetNoticeTone::Success,
@@ -420,8 +430,9 @@ impl FrameRoot {
         if !crate::settings::preset_is_compatible(&preset, metadata.as_ref()) {
             return false;
         }
-        let changed =
-            self.update_selected_config(|config| apply_preset(config, &preset, metadata.as_ref()));
+        let changed = self.update_selected_config_preserve_snapshot(|config| {
+            apply_preset(config, &preset, metadata.as_ref())
+        });
         if changed {
             self.settings_ui.preset_notice = Some(PresetNotice {
                 text: format!("已应用“{}”", preset.name),
@@ -429,6 +440,62 @@ impl FrameRoot {
             });
         }
         changed
+    }
+
+    pub(super) fn toggle_preset_menu(&mut self) {
+        self.settings_ui.preset_menu_popover = match self.settings_ui.preset_menu_popover {
+            PopoverState::Open => PopoverState::Hidden,
+            PopoverState::Hidden | PopoverState::Closing => PopoverState::Open,
+        };
+        if !self.settings_ui.preset_menu_popover.is_open() {
+            self.settings_ui.preset_menu_edit_mode = false;
+            self.settings_ui.preset_menu_naming = false;
+        }
+    }
+
+    pub(super) fn close_preset_menu(&mut self) {
+        self.settings_ui.preset_menu_popover = PopoverState::Hidden;
+        self.settings_ui.preset_menu_edit_mode = false;
+        self.settings_ui.preset_menu_naming = false;
+    }
+
+    pub(super) fn toggle_preset_menu_edit(&mut self) {
+        self.settings_ui.preset_menu_edit_mode = !self.settings_ui.preset_menu_edit_mode;
+        self.settings_ui.preset_menu_naming = false;
+    }
+
+    pub(super) fn start_preset_menu_naming(&mut self) {
+        self.settings_ui.preset_menu_naming = !self.settings_ui.preset_menu_naming;
+        self.settings_ui.preset_menu_edit_mode = false;
+        if self.settings_ui.preset_menu_naming {
+            self.settings_ui.preset_name_draft.clear();
+        }
+    }
+
+    /// Save the selected file's current config as a new custom preset from the titlebar menu.
+    pub(super) fn save_preset_from_menu(&mut self) -> bool {
+        if self.update_installation_in_progress() || self.file_queue.selected_file_locked() {
+            return false;
+        }
+        let name = self.settings_ui.preset_name_draft.trim().to_string();
+        if name.is_empty() {
+            return false;
+        }
+        let Some(config) = self.selected_config().cloned() else {
+            return false;
+        };
+
+        let (id, next_sequence) = self.next_custom_preset_identity();
+        self.presets.push(create_custom_preset(id, &name, &config));
+        if self.persist_app_settings().is_err() {
+            self.presets.pop();
+            return false;
+        }
+
+        self.settings_ui.next_custom_preset_sequence = next_sequence;
+        self.settings_ui.preset_name_draft.clear();
+        self.settings_ui.preset_menu_naming = false;
+        true
     }
 
     pub(super) fn confirm_apply_preset_to_all(
@@ -485,6 +552,9 @@ impl FrameRoot {
         }
         let mut changed = false;
         for file in self.file_queue.files_mut() {
+            if !file.is_selected_for_conversion {
+                continue;
+            }
             if !file.status.is_actionable_for_conversion() {
                 continue;
             }
