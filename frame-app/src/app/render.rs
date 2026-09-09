@@ -25,6 +25,8 @@ impl Render for FrameRoot {
         if window.focused(cx).is_none() {
             app_root_focus.focus(window, cx);
         }
+        let preset_menu_name_focus =
+            self.ensure_text_input_focus(FrameTextInputKind::PresetName, cx);
 
         self.reconcile_text_input_focus(window, cx);
 
@@ -575,6 +577,10 @@ impl Render for FrameRoot {
                         root.close_app_settings_appearance_popover(AppearancePopover::UiScale);
                         cx.notify();
                     }
+                    if root.settings_ui.preset_menu_popover.is_open() {
+                        root.close_preset_menu();
+                        cx.notify();
+                    }
                 }),
             )
             .on_drop(cx.listener(|root, paths: &ExternalPaths, _window, cx| {
@@ -590,7 +596,7 @@ impl Render for FrameRoot {
                     }
                 },
             ))
-            .child(titlebar(state, &self.preset_menu_ui(), palette, window, cx))
+            .child(titlebar(state, &self.preset_menu_ui(preset_menu_name_focus), palette, window, cx))
             .child(content)
             .child(FileDropLifecycleProbe { owner: cx.entity() });
 

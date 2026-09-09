@@ -23,25 +23,57 @@ pub(in crate::app) fn settings_panel(
     let active_tab =
         resolve_active_settings_tab(settings.active_tab, settings.config, settings.metadata);
     let visible_tabs = visible_settings_tabs(settings.config, settings.metadata);
-    let mut tab_rail = div()
+    // Purely positional: spread the rail into three clusters across the row.
+    let left: Vec<SettingsTab> = visible_tabs
+        .iter()
+        .copied()
+        .filter(|tab| !rail_cluster_right(tab) && !rail_cluster_middle(tab))
+        .collect();
+    let middle: Vec<SettingsTab> = visible_tabs
+        .iter()
+        .copied()
+        .filter(|tab| rail_cluster_middle(tab))
+        .collect();
+    let right: Vec<SettingsTab> = visible_tabs
+        .iter()
+        .copied()
+        .filter(|tab| rail_cluster_right(tab))
+        .collect();
+    let tab_rail = div()
         .id("settings-tab-list")
         .role(gpui::Role::TabList)
         .aria_label("设置分区")
+        .w_full()
         .flex()
         .items_center()
-        .justify_start()
-        .gap_1();
-    for tab in &visible_tabs {
-        tab_rail = tab_rail.child(settings_tab_button(
-            *tab,
-            active_tab == *tab,
+        .justify_between()
+        .child(settings_tab_cluster(
+            &left,
+            active_tab,
+            &visible_tabs,
+            settings.tooltip_visible_id,
+            palette,
+            window,
+            cx,
+        ))
+        .child(settings_tab_cluster(
+            &middle,
+            active_tab,
+            &visible_tabs,
+            settings.tooltip_visible_id,
+            palette,
+            window,
+            cx,
+        ))
+        .child(settings_tab_cluster(
+            &right,
+            active_tab,
             &visible_tabs,
             settings.tooltip_visible_id,
             palette,
             window,
             cx,
         ));
-    }
 
     div()
         .flex()
@@ -70,6 +102,48 @@ pub(in crate::app) fn settings_panel(
                 .p(theme::ui_rem(SETTINGS_PANEL_PADDING))
                 .child(settings_tab_content(active_tab, settings, window, cx)),
         )
+}
+
+const fn rail_cluster_middle(tab: &SettingsTab) -> bool {
+    matches!(
+        tab,
+        SettingsTab::Video | SettingsTab::Images | SettingsTab::Audio | SettingsTab::Subtitles
+    )
+}
+
+const fn rail_cluster_right(tab: &SettingsTab) -> bool {
+    matches!(
+        tab,
+        SettingsTab::VideoFilters | SettingsTab::AudioFilters | SettingsTab::Metadata
+    )
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Rail clusters mirror the tab button builder's explicit render context."
+)]
+fn settings_tab_cluster(
+    tabs: &[SettingsTab],
+    active_tab: SettingsTab,
+    visible_tabs: &[SettingsTab],
+    tooltip_visible_id: Option<&str>,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let mut group = div().flex().items_center().gap_1();
+    for tab in tabs {
+        group = group.child(settings_tab_button(
+            *tab,
+            active_tab == *tab,
+            visible_tabs,
+            tooltip_visible_id,
+            palette,
+            window,
+            cx,
+        ));
+    }
+    group
 }
 
 pub(in crate::app) fn settings_tab_button(

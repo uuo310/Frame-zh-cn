@@ -93,6 +93,22 @@ fn matched_preset_id(config: &ConversionConfig, presets: &[PresetDefinition]) ->
         .map(|preset| preset.id.clone())
 }
 
+/// Equality for apply-to-all sync purposes: ignores the source-bound fields that
+/// `apply_preset` deliberately preserves per file (track selections, subtitle burn path),
+/// comparing everything else.
+#[must_use]
+pub fn sync_equivalent(a: &ConversionConfig, b: &ConversionConfig) -> bool {
+    let mut a = a.clone();
+    let mut b = b.clone();
+    for config in [&mut a, &mut b] {
+        config.selected_audio_tracks.clear();
+        config.selected_subtitle_tracks.clear();
+        config.external_subtitle_tracks.clear();
+        config.subtitle_burn_path = None;
+    }
+    a == b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +194,23 @@ mod tests {
         assert!(state.has_custom());
         assert!(!state.has_pushable());
         assert_eq!(state.preset_id(), None);
+    }
+
+    #[test]
+    fn sync_equivalent_ignores_source_bound_fields() {
+        let mut a = ConversionConfig::default();
+        let mut b = ConversionConfig::default();
+        a.selected_audio_tracks = vec![0, 1];
+        b.selected_audio_tracks = vec![2];
+        a.subtitle_burn_path = Some("/tmp/x.srt".to_string());
+        assert!(sync_equivalent(&a, &b));
+    }
+
+    #[test]
+    fn sync_equivalent_detects_real_difference() {
+        let mut a = ConversionConfig::default();
+        let b = ConversionConfig::default();
+        a.container = "mkv".to_string();
+        assert!(!sync_equivalent(&a, &b));
     }
 }

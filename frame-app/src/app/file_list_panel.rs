@@ -13,7 +13,7 @@ use super::{
         frame_vertical_uniform_scrollbar,
     },
     primitives::{
-        FrameSurface, button_mouse_down, color, drop_target_shadows, element_id, icon_svg,
+        FrameSurface, button_mouse_down, color, drop_target_shadows, element_id,
         panel_bottom_separator,
     },
 };
@@ -23,7 +23,8 @@ pub(super) fn file_list_panel(
     queue: &FileQueue,
     scroll_handle: &UniformListScrollHandle,
     palette: &'static theme::ThemePalette,
-    cx: &Context<FrameRoot>,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     div()
         .flex()
@@ -37,14 +38,15 @@ pub(super) fn file_list_panel(
                 .border_color(color(palette.control_muted))
                 .shadow(drop_target_shadows(palette))
         })
-        .child(file_list_header(queue.batch_selection_state(), palette, cx))
+        .child(file_list_header(queue.batch_selection_state(), palette, window, cx))
         .child(file_list_body(queue, scroll_handle, palette, cx))
 }
 
 pub(super) fn file_list_header(
     selection: BatchSelectionState,
     palette: &'static theme::ThemePalette,
-    cx: &Context<FrameRoot>,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let selection_enabled = selection.is_enabled;
     let header_checkbox = div()
@@ -124,7 +126,7 @@ pub(super) fn file_list_header(
                         .col_span(5)
                         .flex()
                         .items_center()
-                        .child(file_list_add_source_button(palette, cx)),
+                        .child(file_list_add_source_button(palette, window, cx)),
                 )
                 .child(header_label("大小", 2, true))
                 .child(header_label("目标", 2, true))
@@ -292,32 +294,28 @@ pub(super) fn file_list_row(
 
 fn file_list_add_source_button(
     palette: &'static theme::ThemePalette,
-    cx: &Context<FrameRoot>,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
 ) -> gpui::Stateful<gpui::Div> {
-    div()
-        .id("file-list-add-source")
-        .role(gpui::Role::Button)
-        .aria_label("添加源")
-        .flex()
-        .items_center()
-        .justify_center()
-        .w(theme::ui_rem(FILE_LIST_ACTION_BUTTON_SIZE))
-        .h(theme::ui_rem(FILE_LIST_ACTION_BUTTON_SIZE))
-        .rounded(theme::ui_rem(theme::RADIUS_SM))
-        .hover(|style| {
-            style
-                .bg(color(palette.fill_subtle))
-                .cursor_pointer()
-        })
-        .child(icon_svg(
-            assets::ICON_PLUS,
-            FILE_LIST_ACTION_ICON_SIZE,
-            color(palette.text_muted),
-        ))
-        .on_click(cx.listener(|_root, _: &ClickEvent, window, cx| {
-            cx.stop_propagation();
-            FrameRoot::prompt_add_source(window, cx);
-        }))
+    frame_icon_button(
+        "file-list-add-source",
+        assets::ICON_PLUS,
+        "添加源",
+        FrameIconButtonVariant::Ghost,
+        true,
+        FrameIconButtonSize {
+            button: FILE_LIST_ACTION_BUTTON_SIZE,
+            icon: FILE_LIST_ACTION_ICON_SIZE * 1.1,
+        },
+        palette,
+        window,
+        cx,
+    )
+    .bg(color(palette.fill_subtle))
+    .on_click(cx.listener(|_root, _: &ClickEvent, window, cx| {
+        cx.stop_propagation();
+        FrameRoot::prompt_add_source(window, cx);
+    }))
 }
 
 pub(super) fn header_label(label: &'static str, span: u16, align_right: bool) -> gpui::Div {

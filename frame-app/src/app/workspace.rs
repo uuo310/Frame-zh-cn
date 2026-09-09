@@ -45,7 +45,7 @@ pub(super) fn workspace_view(
                         .row_span(PREVIEW_ROW_SPAN),
                 )
                 .child(
-                    file_list_panel(file_queue, file_list_scroll_handle, settings.palette, cx)
+                    file_list_panel(file_queue, file_list_scroll_handle, settings.palette, window, cx)
                         .row_span(FILE_LIST_ROW_SPAN),
                 ),
         )

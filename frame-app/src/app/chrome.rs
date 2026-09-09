@@ -39,6 +39,13 @@ use super::{
 use gpui::{HighlightStyle, StyledText, deferred};
 
 const MAX_RELEASE_NOTES_CHARS: usize = 8_000;
+/// Right padding reserved for the three Windows window-control buttons plus a breathing gap.
+const WINDOWS_TITLEBAR_RIGHT_INSET: f32 = 3.0 * TITLEBAR_WINDOWS_WINDOW_BUTTON_WIDTH + 24.0;
+/// Right padding reserved for the Linux window controls plus a breathing gap.
+const LINUX_TITLEBAR_RIGHT_INSET: f32 = 3.0 * TITLEBAR_LINUX_WINDOW_BUTTON_SIZE
+    + 2.0 * TITLEBAR_LINUX_WINDOW_CONTROLS_GAP
+    + 2.0 * TITLEBAR_LINUX_WINDOW_CONTROLS_PADDING_X
+    + 24.0;
 const UPDATE_RELEASE_NOTES_MAX_HEIGHT: f32 = 360.0;
 const UPDATE_RELEASE_NOTES_MIN_HEIGHT: f32 = 180.0;
 const UPDATE_RELEASE_NOTES_PADDING_Y: f32 = 24.0;
@@ -134,6 +141,7 @@ pub(super) fn macos_titlebar(
             div()
                 .flex()
                 .items_center()
+                .justify_end()
                 .mt_2()
                 .gap_2()
                 .when(show_workspace_controls, |this| {
@@ -157,7 +165,14 @@ pub(super) fn windows_titlebar(
         .w_full()
         .flex_none()
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-        .child(platform_titlebar_content(state, preset, palette, window, cx))
+        .child(platform_titlebar_content(
+            state,
+            preset,
+            WINDOWS_TITLEBAR_RIGHT_INSET,
+            palette,
+            window,
+            cx,
+        ))
         .child(windows_window_controls(palette, window, cx))
 }
 
@@ -174,7 +189,14 @@ pub(super) fn linux_titlebar(
         .w_full()
         .flex_none()
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-        .child(platform_titlebar_content(state, preset, palette, window, cx))
+        .child(platform_titlebar_content(
+            state,
+            preset,
+            LINUX_TITLEBAR_RIGHT_INSET,
+            palette,
+            window,
+            cx,
+        ))
         .child(linux_window_controls(palette, window, cx))
 }
 
@@ -207,6 +229,7 @@ fn titlebar_drag_surface(cx: &Context<FrameRoot>) -> gpui::Div {
 pub(super) fn platform_titlebar_content(
     state: FrameAppState,
     preset: &PresetMenuUi,
+    right_inset: f32,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
@@ -247,6 +270,8 @@ pub(super) fn platform_titlebar_content(
                         .mt_2()
                         .flex()
                         .items_center()
+                        .justify_end()
+                        .pr(theme::ui_rem(right_inset))
                         .gap_2()
                         .when(show_workspace_controls, |this| {
                             this.child(titlebar_preset_area(preset, palette, window, cx))
@@ -285,6 +310,7 @@ pub(super) fn titlebar_settings_button(
         }
         cx.notify();
     }))
+    .flex_none()
 }
 
 pub(super) fn titlebar_start_button(
@@ -323,6 +349,7 @@ pub(super) fn titlebar_start_button(
             | StartAvailability::NoActionableFiles => {}
         }
     }))
+    .flex_none()
 }
 
 #[derive(Clone, Copy)]

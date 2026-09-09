@@ -15,15 +15,15 @@ use super::primitives::{
     color, icon_svg,
 };
 use super::{
-    ClickEvent, Context, FrameRoot, FrameTextInputKind, InteractiveElement, MouseButton,
-    ParentElement, PopoverState, StatefulInteractiveElement, Styled, TITLEBAR_ACTION_ICON_SIZE,
-    TITLEBAR_BUTTON_HEIGHT, Window, assets, div, theme,
+    ClickEvent, Context, FocusHandle, FrameRoot, FrameTextInputKind, InteractiveElement,
+    MouseButton, ParentElement, PopoverState, StatefulInteractiveElement, Styled,
+    TITLEBAR_ACTION_ICON_SIZE, TITLEBAR_BUTTON_HEIGHT, Window, assets, div, mix_color, theme,
 };
-use gpui::KeyDownEvent;
+use gpui::{KeyDownEvent, deferred};
 use crate::file_queue::FileItem;
 use crate::settings::{
-    PresetDefinition, PresetOption, PresetViewState, SourceKind, preset_options,
-    resolve_preset_view_state, source_kind_for,
+    ConversionConfig, PresetDefinition, PresetOption, PresetViewState, SourceKind, preset_options,
+    resolve_preset_view_state, source_kind_for, sync_equivalent,
 };
 
 /// Everything the titlebar preset area needs, projected from runtime state.
@@ -36,6 +36,10 @@ pub(super) struct PresetMenuModel {
     pub has_custom: bool,
     pub apply_all_visible: bool,
     pub apply_all_enabled: bool,
+    /// All checked files already carry the active config: the apply button shows 已同步.
+    pub apply_all_synced: bool,
+    /// Whether any user-created (deletable) preset exists; gates the edit mode.
+    pub has_custom_preset: bool,
 }
 
 /// Model plus the transient menu UI state, threaded from the render root into the titlebar.
@@ -46,6 +50,7 @@ pub(super) struct PresetMenuUi {
     pub edit_mode: bool,
     pub naming: bool,
     pub name_draft: String,
+    pub name_focus: Option<FocusHandle>,
     pub settings_disabled: bool,
 }
 
@@ -62,18 +67,27 @@ impl FrameRoot {
                 has_custom: false,
                 apply_all_visible: false,
                 apply_all_enabled: false,
+                apply_all_synced: false,
+                has_custom_preset: false,
             };
         };
         let config = file.config.clone();
         let snapshot = file.custom_snapshot.clone();
 
         let view = resolve_preset_view_state(&config, snapshot.as_ref(), &presets);
-        let options = preset_options(&config, &presets, metadata.as_ref())
+        let compatible = preset_options(&config, &presets, metadata.as_ref())
             .into_iter()
             .filter(|option| option.is_compatible)
             .collect::<Vec<_>>();
+        let (mut customs, builtins): (Vec<PresetOption>, Vec<PresetOption>) = compatible
+            .into_iter()
+            .partition(|option| !option.preset.built_in);
+        customs.reverse();
+        let options = customs.into_iter().chain(builtins).collect::<Vec<_>>();
 
-        let (apply_all_visible, apply_all_enabled) = self.apply_all_gates(&view);
+        let (apply_all_visible, apply_all_enabled, apply_all_synced) =
+            self.apply_all_gates(&view, &config);
+        let has_custom_preset = presets.iter().any(|preset| !preset.built_in);
 
         let label = match &view {
             PresetViewState::Matched { preset_id }
@@ -102,27 +116,31 @@ impl FrameRoot {
             options,
             apply_all_visible,
             apply_all_enabled,
+            apply_all_synced,
+            has_custom_preset,
         }
     }
 
     /// Bundle the projected model with the transient menu UI state for the titlebar.
     #[must_use]
-    pub(super) fn preset_menu_ui(&self) -> PresetMenuUi {
+    pub(super) fn preset_menu_ui(&self, name_focus: FocusHandle) -> PresetMenuUi {
         PresetMenuUi {
             model: self.preset_menu_model(),
             popover: self.settings_ui.preset_menu_popover,
             edit_mode: self.settings_ui.preset_menu_edit_mode,
             naming: self.settings_ui.preset_menu_naming,
             name_draft: self.settings_ui.preset_name_draft.clone(),
+            name_focus: Some(name_focus),
             settings_disabled: self.file_queue.selected_file_locked()
                 || self.update_installation_in_progress(),
         }
     }
 
     /// Apply-to-all gates: >=2 checked files, all metadata loaded, all same source kind, and
-    /// the active file of that same kind (D3 + E). Enabled only when the state is pushable and
-    /// no checked file is mid-work (F: otherwise visible but grayed).
-    fn apply_all_gates(&self, view: &PresetViewState) -> (bool, bool) {
+    /// the active file of that same kind (D3 + E). Returns (visible, enabled, synced):
+    /// synced = every checked file already carries the active config (button shows 已同步,
+    /// grayed); enabled only when pending, pushable, and no checked file is mid-work (F).
+    fn apply_all_gates(&self, view: &PresetViewState, active_config: &ConversionConfig) -> (bool, bool, bool) {
         let checked: Vec<&FileItem> = self
             .file_queue
             .files()
@@ -130,7 +148,7 @@ impl FrameRoot {
             .filter(|file| file.is_selected_for_conversion)
             .collect();
         if checked.len() < 2 {
-            return (false, false);
+            return (false, false, false);
         }
         let kinds: Option<Vec<SourceKind>> = checked
             .iter()
@@ -141,18 +159,22 @@ impl FrameRoot {
             })
             .collect();
         let Some(kinds) = kinds else {
-            return (false, false);
+            return (false, false, false);
         };
         let first = kinds[0];
         let homogeneous = kinds.iter().all(|kind| *kind == first);
         let active_kind = source_kind_for(self.selected_source_metadata().as_ref());
         if !homogeneous || active_kind != first {
-            return (false, false);
+            return (false, false, false);
         }
+        let synced = checked
+            .iter()
+            .all(|file| sync_equivalent(&file.config, active_config));
         let any_working = checked
             .iter()
             .any(|file| !file.status.is_actionable_for_conversion());
-        (true, view.has_pushable() && !any_working)
+        let enabled = !synced && view.has_pushable() && !any_working;
+        (true, enabled, synced)
     }
 }
 
@@ -166,7 +188,7 @@ pub(super) fn titlebar_preset_area(
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    let mut area = div().flex().items_center().gap_2();
+    let mut area = div().flex().items_center().gap_2().flex_none();
 
     if ui.model.apply_all_visible {
         area = area.child(titlebar_apply_all_button(ui, palette, window, cx));
@@ -181,11 +203,21 @@ fn titlebar_apply_all_button(
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Stateful<gpui::Div> {
+    let label: &'static str = if ui.model.apply_all_synced {
+        "已同步"
+    } else {
+        "应用"
+    };
+    let a11y: &'static str = if ui.model.apply_all_synced {
+        "已同步到所有勾选文件"
+    } else {
+        "应用到全部"
+    };
     action_button(
         "titlebar-apply-all",
         assets::ICON_LIST_CHECKS,
-        Some("应用"),
-        "应用到全部",
+        Some(label),
+        a11y,
         ButtonVariant::Secondary,
         ui.model.apply_all_enabled,
         palette,
@@ -240,17 +272,16 @@ fn titlebar_preset_button_with_popover(
             TITLEBAR_ACTION_ICON_SIZE,
             animated.foreground,
         ))
+        .child(theme::ui_text_owned(label))
         .child(
             div()
-                .max_w(theme::ui_rem(120.0))
-                .truncate()
-                .child(theme::ui_text_owned(label)),
+                .text_size(theme::ui_rem(10.0))
+                .text_color(animated.foreground)
+                .child("▾"),
         )
-        .child(icon_svg(
-            assets::ICON_ARROW_DOWN,
-            12.0,
-            animated.foreground,
-        ))
+        .on_mouse_down(MouseButton::Left, |_, _window, cx| {
+            cx.stop_propagation();
+        })
         .on_click(cx.listener(|root, _: &ClickEvent, _window, cx| {
             cx.stop_propagation();
             root.toggle_preset_menu();
@@ -271,7 +302,7 @@ fn preset_menu_popover(
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
-) -> gpui::Stateful<gpui::Div> {
+) -> gpui::Deferred {
     let mut list = div().flex().flex_col().gap_1();
 
     if ui.naming {
@@ -292,13 +323,14 @@ fn preset_menu_popover(
         ));
     }
 
-    div()
+    deferred(
+        div()
         .id("titlebar-preset-popover")
         .absolute()
         .top_full()
-        .right_0()
+        .left_0()
         .mt_1()
-        .w(theme::ui_rem(260.0))
+        .w(theme::ui_rem(195.0))
         .max_h(theme::ui_rem(320.0))
         .overflow_hidden()
         .flex()
@@ -306,6 +338,12 @@ fn preset_menu_popover(
         .gap_1()
         .p(theme::ui_rem(4.0))
         .rounded(theme::ui_rem(theme::RADIUS_SM))
+        .border_1()
+        .border_color(mix_color(
+            palette.transparent,
+            palette.text_primary,
+            0.30,
+        ))
         .bg(color(palette.surface_elevated))
         .shadow(card_surface_shadows(palette))
         .occlude()
@@ -328,7 +366,9 @@ fn preset_menu_popover(
                 .gap_1()
                 .child(list),
         )
-        .child(preset_menu_footer(ui, palette, window, cx))
+        .child(preset_menu_footer(ui, palette, window, cx)),
+    )
+    .with_priority(20)
 }
 
 fn preset_menu_naming_row(
@@ -348,7 +388,7 @@ fn preset_menu_naming_row(
                 value: draft.as_str(),
                 placeholder: "预设名称",
                 disabled: false,
-                focus: None,
+                focus: ui.name_focus.as_ref(),
                 kind: FrameTextInputKind::PresetName,
             },
             palette,
@@ -452,29 +492,55 @@ fn preset_menu_preset_row(
             .child(theme::ui_text_owned(name)),
     );
 
-    if edit_mode && !built_in {
+    if !built_in {
         row = row.child(
-            frame_icon_button(
-                format!("titlebar-preset-delete-{delete_id}"),
-                assets::ICON_CLOSE,
-                "删除预设",
-                FrameIconButtonVariant::DestructiveGhost,
-                !ui.settings_disabled,
-                FrameIconButtonSize {
-                    button: FRAME_ICON_BUTTON_SM_SIZE,
-                    icon: FRAME_ICON_SM_SIZE,
-                },
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if root.delete_preset(&delete_id) {
-                    cx.notify();
-                }
-            })),
+            div()
+                .flex_none()
+                .w(theme::ui_rem(10.0))
+                .flex()
+                .items_center()
+                .justify_end()
+                .child(
+                    div()
+                        .rounded_full()
+                        .w(theme::ui_rem(6.0))
+                        .h(theme::ui_rem(6.0))
+                        .bg(color(palette.text_muted)),
+                ),
         );
+    }
+
+    if !built_in {
+        if edit_mode {
+            row = row.child(
+                frame_icon_button(
+                    format!("titlebar-preset-delete-{delete_id}"),
+                    assets::ICON_CLOSE,
+                    "删除预设",
+                    FrameIconButtonVariant::DestructiveGhost,
+                    !ui.settings_disabled,
+                    FrameIconButtonSize {
+                        button: FRAME_ICON_BUTTON_SM_SIZE,
+                        icon: FRAME_ICON_SM_SIZE,
+                    },
+                    palette,
+                    window,
+                    cx,
+                )
+                .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                    cx.stop_propagation();
+                    if root.delete_preset(&delete_id) {
+                        cx.notify();
+                    }
+                })),
+            );
+        } else {
+            row = row.child(
+                div()
+                    .flex_none()
+                    .w(theme::ui_rem(FRAME_ICON_BUTTON_SM_SIZE)),
+            );
+        }
     }
 
     row
@@ -506,9 +572,14 @@ fn preset_menu_footer(
                 window,
                 cx,
             )
-            .on_click(cx.listener(|root, _: &ClickEvent, _window, cx| {
+            .on_click(cx.listener(|root, _: &ClickEvent, window, cx| {
                 cx.stop_propagation();
                 root.start_preset_menu_naming();
+                if root.settings_ui.preset_menu_naming {
+                    let focus =
+                        root.ensure_text_input_focus(FrameTextInputKind::PresetName, cx);
+                    focus.focus(window, cx);
+                }
                 cx.notify();
             })),
         )
@@ -522,7 +593,7 @@ fn preset_menu_footer(
                 },
                 if ui.edit_mode { "完成编辑" } else { "编辑预设" },
                 FrameIconButtonVariant::Ghost,
-                !ui.settings_disabled,
+                !ui.settings_disabled && (ui.edit_mode || ui.model.has_custom_preset),
                 FrameIconButtonSize {
                     button: FRAME_ICON_BUTTON_SM_SIZE,
                     icon: FRAME_ICON_SM_SIZE,
