@@ -447,7 +447,9 @@ impl FrameRoot {
             PopoverState::Open => PopoverState::Hidden,
             PopoverState::Hidden | PopoverState::Closing => PopoverState::Open,
         };
-        if !self.settings_ui.preset_menu_popover.is_open() {
+        if self.settings_ui.preset_menu_popover.is_open() {
+            self.close_video_selects_immediate();
+        } else {
             self.settings_ui.preset_menu_edit_mode = false;
             self.settings_ui.preset_menu_naming = false;
         }

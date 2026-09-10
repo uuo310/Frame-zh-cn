@@ -4007,6 +4007,12 @@ mod preview_shell {
     ) -> SettingsRenderState<'a> {
         let subtitle_font_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let subtitle_font_size_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_pixel_format_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_codec_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_preset_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_resolution_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_scaling_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_fps_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
 
         SettingsRenderState {
             palette: theme::palette(crate::appearance::ColorTheme::Dark),
@@ -4024,6 +4030,72 @@ mod preview_shell {
             video_height_focus: None,
             video_bitrate_focus: None,
             gif_loop_focus: None,
+            video_pixel_format_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_pixel_format_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_codec_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_codec_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_preset_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_preset_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_resolution_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_resolution_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_scaling_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_scaling_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_fps_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_fps_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
             metadata_focuses: SettingsMetadataInputFocuses {
                 title: None,
                 artist: None,

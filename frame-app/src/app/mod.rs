@@ -119,17 +119,17 @@ use crate::{
         apply_audio_bitrate_mode, apply_audio_channels, apply_audio_codec, apply_audio_normalize,
         apply_audio_quality, apply_audio_volume, apply_crf, apply_custom_height,
         apply_custom_width, apply_external_subtitle_default, apply_external_subtitle_forced,
-        apply_external_subtitle_language, apply_external_subtitle_title, apply_fps,
+        apply_external_subtitle_language, apply_external_subtitle_title,
         apply_gif_colors, apply_gif_dither, apply_gif_loop, apply_hw_decode,
         apply_image_jpeg_huffman, apply_image_jpeg_quality, apply_image_png_compression,
         apply_image_png_prediction, apply_image_tiff_compression, apply_image_webp_compression,
         apply_image_webp_lossless, apply_image_webp_preset, apply_image_webp_quality,
         apply_metadata_field, apply_metadata_mode, apply_nvenc_spatial_aq, apply_nvenc_temporal_aq,
         apply_output_container, apply_pixel_format, apply_preset, apply_processing_mode,
-        apply_quality, apply_resolution, apply_scaling_algorithm, apply_subtitle_burn_path,
+        apply_quality, apply_subtitle_burn_path,
         apply_subtitle_font_color, apply_subtitle_font_name, apply_subtitle_font_size,
         apply_subtitle_outline_color, apply_subtitle_position, apply_trim_times,
-        apply_video_bitrate, apply_video_bitrate_mode, apply_video_codec, apply_video_preset,
+        apply_video_bitrate, apply_video_bitrate_mode,
         apply_videotoolbox_allow_sw, audio_channel_options, audio_codec_options,
         audio_codec_supports_vbr, audio_quality_range, audio_track_options, create_custom_preset,
         default_presets, fps_options, gif_color_options, gif_dither_options,
@@ -139,7 +139,7 @@ use crate::{
         metadata_field_options, metadata_field_value, metadata_mode_description,
         metadata_mode_options, mp2_original_channels_are_unsupported, normalize_output_config,
         normalized_hex_color, output_container_options, output_processing_mode_options,
-        preset_options, remove_external_subtitle_track, resolution_options,
+        remove_external_subtitle_track, resolution_options,
         resolve_active_settings_tab, sanitize_output_name, scaling_algorithm_options,
         source_info_sections, subtitle_burn_file_label, subtitle_color_value,
         subtitle_font_options, subtitle_font_size_options, subtitle_position_options,
@@ -327,6 +327,21 @@ struct SettingsUiState {
     preset_menu_popover: PopoverState,
     preset_menu_edit_mode: bool,
     preset_menu_naming: bool,
+    video_pixel_format_select_popover: PopoverState,
+    video_pixel_format_select_scroll: ScrollHandle,
+    video_codec_select_popover: PopoverState,
+    video_codec_select_scroll: ScrollHandle,
+    video_preset_select_popover: PopoverState,
+    video_preset_select_scroll: ScrollHandle,
+    video_resolution_select_popover: PopoverState,
+    video_resolution_select_scroll: ScrollHandle,
+    video_scaling_select_popover: PopoverState,
+    video_scaling_select_scroll: ScrollHandle,
+    video_fps_select_popover: PopoverState,
+    video_fps_select_scroll: ScrollHandle,
+    /// Popover placement anchor (window-space mouse y at last hover), one slot
+    /// per video select row; frozen while that row's popover is not Hidden.
+    video_select_anchor_y: [Option<f32>; 6],
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -433,6 +448,19 @@ impl Default for SettingsUiState {
             preset_menu_popover: PopoverState::Hidden,
             preset_menu_edit_mode: false,
             preset_menu_naming: false,
+            video_pixel_format_select_popover: PopoverState::Hidden,
+            video_pixel_format_select_scroll: ScrollHandle::new(),
+            video_codec_select_popover: PopoverState::Hidden,
+            video_codec_select_scroll: ScrollHandle::new(),
+            video_preset_select_popover: PopoverState::Hidden,
+            video_preset_select_scroll: ScrollHandle::new(),
+            video_resolution_select_popover: PopoverState::Hidden,
+            video_resolution_select_scroll: ScrollHandle::new(),
+            video_scaling_select_popover: PopoverState::Hidden,
+            video_scaling_select_scroll: ScrollHandle::new(),
+            video_fps_select_popover: PopoverState::Hidden,
+            video_fps_select_scroll: ScrollHandle::new(),
+            video_select_anchor_y: [None; 6],
         }
     }
 }
@@ -816,6 +844,12 @@ struct SettingsRenderState<'a> {
     video_height_focus: Option<&'a FocusHandle>,
     video_bitrate_focus: Option<&'a FocusHandle>,
     gif_loop_focus: Option<&'a FocusHandle>,
+    video_pixel_format_select: SettingsVideoSelectUi<'a>,
+    video_codec_select: SettingsVideoSelectUi<'a>,
+    video_preset_select: SettingsVideoSelectUi<'a>,
+    video_resolution_select: SettingsVideoSelectUi<'a>,
+    video_scaling_select: SettingsVideoSelectUi<'a>,
+    video_fps_select: SettingsVideoSelectUi<'a>,
     metadata_focuses: SettingsMetadataInputFocuses<'a>,
     subtitle_focuses: SettingsSubtitleFocuses<'a>,
     external_subtitle_language_focus: Option<&'a FocusHandle>,
@@ -846,6 +880,22 @@ struct SettingsVideoInputFocuses<'a> {
     height: Option<&'a FocusHandle>,
     bitrate: Option<&'a FocusHandle>,
     gif_loop: Option<&'a FocusHandle>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::app) struct SettingsSelectFocuses<'a> {
+    pub(in crate::app) trigger: Option<&'a FocusHandle>,
+    pub(in crate::app) panel: Option<&'a FocusHandle>,
+    pub(in crate::app) first_option: Option<&'a FocusHandle>,
+    pub(in crate::app) last_option: Option<&'a FocusHandle>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::app) struct SettingsVideoSelectUi<'a> {
+    pub(in crate::app) popover: PopoverState,
+    pub(in crate::app) scroll_handle: &'a ScrollHandle,
+    pub(in crate::app) focuses: SettingsSelectFocuses<'a>,
+    pub(in crate::app) anchor_y: Option<f32>,
 }
 
 #[derive(Clone, Copy)]

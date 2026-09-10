@@ -3,6 +3,7 @@ use super::files::FileDropLifecycleProbe;
 use super::preview_panel::{
     PreviewEditToolbarFocus, PreviewEditToolbarFocuses, PreviewToolFocuses, PreviewViewportFocuses,
 };
+use super::settings_panel::VideoSelectId;
 use super::*;
 use crate::app::chrome::UpdateDialogView;
 
@@ -192,6 +193,129 @@ impl Render for FrameRoot {
                 let video_bitrate_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::VideoBitrate, cx);
                 let gif_loop_focus = self.ensure_text_input_focus(FrameTextInputKind::GifLoop, cx);
+                let video_selects_enabled =
+                    self.settings_ui.active_tab == SettingsTab::Video
+                        && !self.file_queue.selected_file_locked();
+                let video_pixel_format_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-pixel-format-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_pixel_format_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-pixel-format-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_pixel_format_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-pixel-format-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_pixel_format_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-pixel-format-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_codec_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-codec-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_codec_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-codec-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_codec_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-codec-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_codec_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-codec-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_preset_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-preset-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_preset_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-preset-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_preset_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-preset-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_preset_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-preset-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_resolution_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-resolution-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_resolution_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-resolution-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_resolution_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-resolution-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_resolution_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-resolution-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_scaling_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-scaling-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_scaling_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-scaling-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_scaling_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-scaling-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_scaling_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-scaling-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_fps_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-fps-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_fps_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-fps-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_fps_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-fps-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_fps_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-fps-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
                 let preview_start_time_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::PreviewStartTime, cx);
                 let preview_end_time_focus =
@@ -420,6 +544,72 @@ impl Render for FrameRoot {
                     video_height_focus: Some(&video_height_focus),
                     video_bitrate_focus: Some(&video_bitrate_focus),
                     gif_loop_focus: Some(&gif_loop_focus),
+                    video_pixel_format_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_pixel_format_select_popover,
+                        scroll_handle: &self.settings_ui.video_pixel_format_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::PixelFormat),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_pixel_format_select_trigger_focus),
+                            panel: Some(&video_pixel_format_select_panel_focus),
+                            first_option: Some(&video_pixel_format_select_first_focus),
+                            last_option: Some(&video_pixel_format_select_last_focus),
+                        },
+                    },
+                    video_codec_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_codec_select_popover,
+                        scroll_handle: &self.settings_ui.video_codec_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::Codec),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_codec_select_trigger_focus),
+                            panel: Some(&video_codec_select_panel_focus),
+                            first_option: Some(&video_codec_select_first_focus),
+                            last_option: Some(&video_codec_select_last_focus),
+                        },
+                    },
+                    video_preset_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_preset_select_popover,
+                        scroll_handle: &self.settings_ui.video_preset_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::Preset),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_preset_select_trigger_focus),
+                            panel: Some(&video_preset_select_panel_focus),
+                            first_option: Some(&video_preset_select_first_focus),
+                            last_option: Some(&video_preset_select_last_focus),
+                        },
+                    },
+                    video_resolution_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_resolution_select_popover,
+                        scroll_handle: &self.settings_ui.video_resolution_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::Resolution),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_resolution_select_trigger_focus),
+                            panel: Some(&video_resolution_select_panel_focus),
+                            first_option: Some(&video_resolution_select_first_focus),
+                            last_option: Some(&video_resolution_select_last_focus),
+                        },
+                    },
+                    video_scaling_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_scaling_select_popover,
+                        scroll_handle: &self.settings_ui.video_scaling_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::Scaling),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_scaling_select_trigger_focus),
+                            panel: Some(&video_scaling_select_panel_focus),
+                            first_option: Some(&video_scaling_select_first_focus),
+                            last_option: Some(&video_scaling_select_last_focus),
+                        },
+                    },
+                    video_fps_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_fps_select_popover,
+                        scroll_handle: &self.settings_ui.video_fps_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::Fps),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_fps_select_trigger_focus),
+                            panel: Some(&video_fps_select_panel_focus),
+                            first_option: Some(&video_fps_select_first_focus),
+                            last_option: Some(&video_fps_select_last_focus),
+                        },
+                    },
                     metadata_focuses: SettingsMetadataInputFocuses {
                         title: Some(&metadata_title_focus),
                         artist: Some(&metadata_artist_focus),
@@ -579,6 +769,10 @@ impl Render for FrameRoot {
                     }
                     if root.settings_ui.preset_menu_popover.is_open() {
                         root.close_preset_menu();
+                        cx.notify();
+                    }
+                    if root.video_select_any_open() {
+                        root.close_video_selects();
                         cx.notify();
                     }
                 }),

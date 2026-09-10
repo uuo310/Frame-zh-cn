@@ -31,39 +31,149 @@ pub(in crate::app) fn settings_video_tab(
     settings_disabled: bool,
     available_encoders: &AvailableEncoders,
     focuses: SettingsVideoInputFocuses<'_>,
+    pixel_format_select: SettingsVideoSelectUi<'_>,
+    codec_select: SettingsVideoSelectUi<'_>,
+    preset_select: SettingsVideoSelectUi<'_>,
+    resolution_select: SettingsVideoSelectUi<'_>,
+    scaling_select: SettingsVideoSelectUi<'_>,
+    fps_select: SettingsVideoSelectUi<'_>,
+    metadata: Option<&SourceMetadata>,
+    tooltip_visible_id: Option<&str>,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let is_gif_mode = is_gif_container(&config.container);
-    let mut content = div()
-        .flex()
-        .flex_col()
-        .gap_4()
-        .child(settings_video_resolution_section(
-            config,
-            settings_disabled,
-            focuses.width,
-            focuses.height,
+    let pixel_format_options = video_pixel_format_options(config)
+        .into_iter()
+        .map(|option| VideoSelectOption {
+            id: option.id,
+            label: option.label.to_string(),
+            caption: option.caption.to_string(),
+            selected: option.is_selected,
+            enabled: !settings_disabled && !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let pixel_format_selected_label = pixel_format_options
+        .iter()
+        .find(|option| option.selected)
+        .map(|option| option.label.clone())
+        .unwrap_or_else(|| config.pixel_format.clone());
+    let codec_options = video_codec_options(config, available_encoders, settings_disabled)
+        .into_iter()
+        .map(|option| VideoSelectOption {
+            id: option.codec,
+            label: option.label.to_string(),
+            caption: option.disabled_reason.unwrap_or(option.codec).to_string(),
+            selected: option.is_selected,
+            enabled: !settings_disabled && !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let codec_selected_label = codec_options
+        .iter()
+        .find(|option| option.selected)
+        .map(|option| option.label.clone())
+        .unwrap_or_else(|| config.video_codec.clone());
+    let preset_options = video_preset_options(config, settings_disabled)
+        .into_iter()
+        .map(|option| VideoSelectOption {
+            id: option.preset,
+            label: option.label.to_string(),
+            caption: option.caption.to_string(),
+            selected: option.is_selected,
+            enabled: !settings_disabled && !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let preset_selected_label = preset_options
+        .iter()
+        .find(|option| option.selected)
+        .map(|option| option.label.clone())
+        .unwrap_or_else(|| config.preset.clone());
+    let resolution_options_list =
+        video_resolution_select_options(config, settings_disabled, metadata);
+    let resolution_selected_label = resolution_label(&config.resolution).to_string();
+    let scaling_options_list = video_scaling_select_options(config, settings_disabled);
+    let scaling_selected_label = scaling_algorithm_label(&config.scaling_algorithm).to_string();
+    let fps_options_list = fps_options(is_gif_mode)
+        .iter()
+        .map(|fps| VideoSelectOption {
+            id: fps,
+            label: fps_label(fps),
+            caption: fps_option_caption(fps, metadata),
+            selected: config.fps == *fps,
+            enabled: !settings_disabled,
+        })
+        .collect::<Vec<_>>();
+    let fps_selected_label = fps_label(&config.fps);
+    let mut content = div().flex().flex_col().gap_4().child(video_select_row(
+        VideoSelectRowState {
+            id: VideoSelectId::Resolution,
+            options: resolution_options_list,
+            selected_label: resolution_selected_label,
+            enabled: !settings_disabled,
+            tooltip_visible_id,
             palette,
-            window,
-            cx,
-        ))
-        .child(settings_video_scaling_section(
-            config,
-            settings_disabled,
-            palette,
-            window,
-            cx,
-        ));
-
-    content = content.child(settings_video_fps_section(
-        config,
-        settings_disabled,
-        palette,
+            ui: resolution_select,
+        },
         window,
         cx,
     ));
+
+    if config.resolution == "custom" {
+        content = content
+            .child(settings_dimension_row(
+                "宽度",
+                "settings-video-width-field",
+                config.custom_width.as_deref().unwrap_or_default(),
+                "1920",
+                settings_disabled,
+                focuses.width,
+                FrameTextInputKind::VideoCustomWidth,
+                palette,
+                window,
+                cx,
+            ))
+            .child(settings_dimension_row(
+                "高度",
+                "settings-video-height-field",
+                config.custom_height.as_deref().unwrap_or_default(),
+                "1080",
+                settings_disabled,
+                focuses.height,
+                FrameTextInputKind::VideoCustomHeight,
+                palette,
+                window,
+                cx,
+            ));
+    }
+
+    content = content
+        .child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::Scaling,
+                options: scaling_options_list,
+                selected_label: scaling_selected_label,
+                enabled: !settings_disabled && config.resolution != "original",
+                tooltip_visible_id,
+                palette,
+                ui: scaling_select,
+            },
+            window,
+            cx,
+        ))
+        .child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::Fps,
+                options: fps_options_list,
+                selected_label: fps_selected_label,
+                enabled: !settings_disabled,
+                tooltip_visible_id,
+                palette,
+                ui: fps_select,
+            },
+            window,
+            cx,
+        ));
 
     if is_gif_mode {
         return content
@@ -92,28 +202,45 @@ pub(in crate::app) fn settings_video_tab(
     }
 
     content
-        .child(settings_video_encoder_section(
-            config,
-            settings_disabled,
-            available_encoders,
-            palette,
+        .child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::Codec,
+                options: codec_options,
+                selected_label: codec_selected_label,
+                enabled: !settings_disabled,
+                tooltip_visible_id,
+                palette,
+                ui: codec_select,
+            },
             window,
             cx,
         ))
-        .child(settings_video_pixel_format_section(
-            config,
-            settings_disabled,
-            palette,
+        .child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::PixelFormat,
+                options: pixel_format_options,
+                selected_label: pixel_format_selected_label,
+                enabled: !settings_disabled,
+                tooltip_visible_id,
+                palette,
+                ui: pixel_format_select,
+            },
             window,
             cx,
         ))
         .when(
             !is_videotoolbox_video_codec(&config.video_codec) && config.video_codec != "mpeg2video",
             |this| {
-                this.child(settings_video_preset_section(
-                    config,
-                    settings_disabled,
-                    palette,
+                this.child(video_select_row(
+                    VideoSelectRowState {
+                        id: VideoSelectId::Preset,
+                        options: preset_options,
+                        selected_label: preset_selected_label,
+                        enabled: !settings_disabled,
+                        tooltip_visible_id,
+                        palette,
+                        ui: preset_select,
+                    },
                     window,
                     cx,
                 ))
@@ -153,194 +280,131 @@ pub(in crate::app) fn settings_video_tab(
         })
 }
 
-pub(in crate::app) fn settings_video_resolution_section(
+pub(in crate::app) fn video_resolution_select_options(
     config: &ConversionConfig,
     settings_disabled: bool,
-    video_width_focus: Option<&FocusHandle>,
-    video_height_focus: Option<&FocusHandle>,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut section = settings_section("分辨率与帧率", palette).child(
-        settings_resolution_grid(config, settings_disabled, palette, window, cx),
-    );
-
-    if config.resolution == "custom" {
-        section = section.child(settings_custom_dimensions_grid(
-            config,
-            settings_disabled,
-            video_width_focus,
-            video_height_focus,
-            palette,
-            window,
-            cx,
-        ));
-    }
-
-    section
+    metadata: Option<&SourceMetadata>,
+) -> Vec<VideoSelectOption> {
+    resolution_options()
+        .iter()
+        .map(|resolution| VideoSelectOption {
+            id: resolution,
+            label: resolution_label(resolution).to_string(),
+            caption: resolution_option_caption(resolution, config, metadata),
+            selected: config.resolution == *resolution,
+            enabled: !settings_disabled,
+        })
+        .collect()
 }
 
-pub(in crate::app) fn settings_resolution_grid(
+pub(in crate::app) fn video_scaling_select_options(
     config: &ConversionConfig,
-    disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut grid = div().grid().grid_cols(2).gap_2();
-    for resolution in resolution_options() {
-        let selected = config.resolution == *resolution;
-        let label = resolution_label(resolution);
-        grid = grid.child(
-            frame_choice_button(
-                format!("video-resolution-{resolution}"),
-                label,
-                selected,
-                !disabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_resolution(config, resolution)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-    grid
+    settings_disabled: bool,
+) -> Vec<VideoSelectOption> {
+    scaling_algorithm_options()
+        .iter()
+        .map(|algorithm| VideoSelectOption {
+            id: algorithm,
+            label: scaling_algorithm_label(algorithm).to_string(),
+            caption: String::new(),
+            selected: config.scaling_algorithm == *algorithm,
+            enabled: !settings_disabled && config.resolution != "original",
+        })
+        .collect()
 }
 
-fn settings_custom_dimensions_grid(
+fn resolution_option_caption(
+    resolution: &str,
     config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> String {
+    match resolution {
+        "original" => metadata
+            .and_then(|meta| match (meta.width, meta.height) {
+                (Some(width), Some(height)) => Some(format!("{width}×{height}")),
+                _ => None,
+            })
+            .unwrap_or_default(),
+        "custom" => match (config.custom_width.as_deref(), config.custom_height.as_deref()) {
+            (Some(width), Some(height)) if !width.is_empty() && !height.is_empty() => {
+                format!("{width}×{height}")
+            }
+            _ => String::new(),
+        },
+        _ => String::new(),
+    }
+}
+
+fn fps_option_caption(fps: &str, metadata: Option<&SourceMetadata>) -> String {
+    if fps != "original" {
+        return String::new();
+    }
+    metadata
+        .and_then(|meta| meta.frame_rate)
+        .map_or_else(String::new, |rate| {
+            format!("{} fps", format_frame_rate(rate))
+        })
+}
+
+fn format_frame_rate(rate: f64) -> String {
+    let rounded = rate.round();
+    if (rate - rounded).abs() < 0.005 {
+        rounded.to_string()
+    } else {
+        format!("{rate:.2}")
+            .trim_end_matches('0')
+            .trim_end_matches('.')
+            .to_string()
+    }
+}
+
+pub(in crate::app) fn settings_dimension_row(
+    label: &'static str,
+    id: &'static str,
+    value: &str,
+    placeholder: &'static str,
     disabled: bool,
-    video_width_focus: Option<&FocusHandle>,
-    video_height_focus: Option<&FocusHandle>,
+    focus: Option<&FocusHandle>,
+    kind: FrameTextInputKind,
     palette: &'static theme::ThemePalette,
     window: &Window,
     cx: &Context<FrameRoot>,
 ) -> gpui::Div {
+    let label_cell = div()
+        .flex_none()
+        .w(theme::ui_rem(VIDEO_SELECT_LABEL_COLUMN_WIDTH))
+        .min_w_0()
+        .child(
+            div()
+                .truncate()
+                .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+                .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+                .text_color(color(palette.text_primary))
+                .child(theme::ui_text(label)),
+        );
     div()
-        .grid()
-        .grid_cols(2)
-        .gap_2()
-        .pt(theme::ui_rem(4.0))
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(label_cell)
         .child(
             div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(settings_field_label("宽度", palette))
+                .flex_none()
+                .w(gpui::relative(VIDEO_SELECT_TRIGGER_WIDTH_RATIO))
                 .child(frame_text_input(
                     FrameTextInputSpec {
-                        id: "settings-video-width-field",
-                        value: config.custom_width.as_deref().unwrap_or_default(),
-                        placeholder: "1920",
+                        id,
+                        value,
+                        placeholder,
                         disabled,
-                        focus: video_width_focus,
-                        kind: FrameTextInputKind::VideoCustomWidth,
+                        focus,
+                        kind,
                     },
                     palette,
                     window,
                     cx,
                 )),
         )
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_1()
-                .child(settings_field_label("高度", palette))
-                .child(frame_text_input(
-                    FrameTextInputSpec {
-                        id: "settings-video-height-field",
-                        value: config.custom_height.as_deref().unwrap_or_default(),
-                        placeholder: "1080",
-                        disabled,
-                        focus: video_height_focus,
-                        kind: FrameTextInputKind::VideoCustomHeight,
-                    },
-                    palette,
-                    window,
-                    cx,
-                )),
-        )
-}
-
-pub(in crate::app) fn settings_video_scaling_section(
-    config: &ConversionConfig,
-    settings_disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let disabled = settings_disabled || config.resolution == "original";
-    let mut grid = div().grid().grid_cols(2).gap_2();
-    for algorithm in scaling_algorithm_options() {
-        grid = grid.child(
-            frame_choice_button(
-                format!("video-scaling-{algorithm}"),
-                scaling_algorithm_label(algorithm),
-                config.scaling_algorithm == *algorithm,
-                !disabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_scaling_algorithm(config, algorithm))
-                {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-
-    settings_section("缩放算法", palette).child(grid)
-}
-
-pub(in crate::app) fn settings_video_fps_section(
-    config: &ConversionConfig,
-    settings_disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let is_gif = is_gif_container(&config.container);
-    let mut grid = div().grid().grid_cols(2).gap_2();
-    for fps in fps_options(is_gif) {
-        grid = grid.child(
-            frame_choice_button(
-                format!("video-fps-{fps}"),
-                fps_label(fps),
-                config.fps == *fps,
-                !settings_disabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if settings_disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_fps(config, fps)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-
-    settings_section("帧率", palette).child(grid)
 }
 
 pub(in crate::app) fn settings_video_gif_colors_section(
@@ -436,118 +500,6 @@ fn settings_video_gif_loop_section(
             cx,
         ))
         .child(settings_hint_text("设为 0 表示无限循环。", palette))
-}
-
-fn settings_video_encoder_section(
-    config: &ConversionConfig,
-    settings_disabled: bool,
-    available_encoders: &AvailableEncoders,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut list = div().grid().grid_cols(1);
-    for option in video_codec_options(config, available_encoders, settings_disabled) {
-        let codec = option.codec;
-        let enabled = !option.is_disabled;
-        list = list.child(
-            frame_list_item_with_caption(
-                format!("video-codec-{codec}"),
-                codec,
-                option.disabled_reason.unwrap_or(option.label).to_string(),
-                option.is_selected,
-                enabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if !enabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_video_codec(config, codec)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-
-    settings_section("视频编码器", palette).child(list)
-}
-
-fn settings_video_pixel_format_section(
-    config: &ConversionConfig,
-    settings_disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut list = div().grid().grid_cols(1);
-    for option in video_pixel_format_options(config) {
-        let pixel_format = option.id;
-        let enabled = !settings_disabled && !option.is_disabled;
-        list = list.child(
-            frame_list_item_with_caption(
-                format!("video-pixel-format-{pixel_format}"),
-                option.label,
-                option.caption,
-                option.is_selected,
-                enabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if !enabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_pixel_format(config, pixel_format)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-
-    settings_section("像素格式", palette).child(list)
-}
-
-fn settings_video_preset_section(
-    config: &ConversionConfig,
-    settings_disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut list = div().grid().grid_cols(1);
-    for option in video_preset_options(config, settings_disabled) {
-        let preset = option.preset;
-        let enabled = !option.is_disabled;
-        list = list.child(
-            frame_list_item_with_caption(
-                format!("video-preset-{preset}"),
-                option.label,
-                option.caption,
-                option.is_selected,
-                enabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if !enabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_video_preset(config, preset)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-
-    settings_section("编码速度·Preset", palette).child(list)
 }
 
 fn settings_video_quality_section(
@@ -952,7 +904,7 @@ fn settings_video_checkbox_row(
     frame_checkbox_row(id, label, hint, checked, disabled, palette, cx, action)
 }
 
-fn resolution_label(resolution: &str) -> &'static str {
+pub(in crate::app) fn resolution_label(resolution: &str) -> &'static str {
     match resolution {
         "custom" => "自定义",
         "1080p" => "1080p",
@@ -962,7 +914,7 @@ fn resolution_label(resolution: &str) -> &'static str {
     }
 }
 
-fn scaling_algorithm_label(algorithm: &str) -> &'static str {
+pub(in crate::app) fn scaling_algorithm_label(algorithm: &str) -> &'static str {
     match algorithm {
         "lanczos" => "Lanczos",
         "bilinear" => "Bilinear",

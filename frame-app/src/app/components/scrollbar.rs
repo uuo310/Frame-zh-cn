@@ -5,6 +5,45 @@ const FRAME_SCROLLBAR_TRACK_WIDTH: f32 = 6.0;
 const FRAME_SCROLLBAR_THUMB_WIDTH: f32 = 6.0;
 const FRAME_SCROLLBAR_MIN_THUMB_HEIGHT: f32 = 28.0;
 
+const FRAME_SCROLLBAR_SUBTLE_WIDTH: f32 = 6.0;
+const FRAME_SCROLLBAR_SUBTLE_TRACK_WIDTH: f32 = 3.0;
+const FRAME_SCROLLBAR_SUBTLE_THUMB_WIDTH: f32 = 3.0;
+const FRAME_SCROLLBAR_SUBTLE_MIN_THUMB_HEIGHT: f32 = 20.0;
+const FRAME_SCROLLBAR_SUBTLE_TRACK_ALPHA: f32 = 0.15;
+const FRAME_SCROLLBAR_SUBTLE_THUMB_ALPHA: f32 = 0.20;
+
+#[derive(Clone, Copy)]
+struct FrameScrollbarStyle {
+    width: f32,
+    track_width: f32,
+    thumb_width: f32,
+    min_thumb_height: f32,
+    track_color: Rgba,
+    thumb_color: Rgba,
+}
+
+fn frame_scrollbar_normal_style(palette: &'static theme::ThemePalette) -> FrameScrollbarStyle {
+    FrameScrollbarStyle {
+        width: FRAME_SCROLLBAR_WIDTH,
+        track_width: FRAME_SCROLLBAR_TRACK_WIDTH,
+        thumb_width: FRAME_SCROLLBAR_THUMB_WIDTH,
+        min_thumb_height: FRAME_SCROLLBAR_MIN_THUMB_HEIGHT,
+        track_color: color(palette.fill_subtle),
+        thumb_color: color(palette.control_muted),
+    }
+}
+
+fn frame_scrollbar_subtle_style(palette: &'static theme::ThemePalette) -> FrameScrollbarStyle {
+    FrameScrollbarStyle {
+        width: FRAME_SCROLLBAR_SUBTLE_WIDTH,
+        track_width: FRAME_SCROLLBAR_SUBTLE_TRACK_WIDTH,
+        thumb_width: FRAME_SCROLLBAR_SUBTLE_THUMB_WIDTH,
+        min_thumb_height: FRAME_SCROLLBAR_SUBTLE_MIN_THUMB_HEIGHT,
+        track_color: color(palette.fill_subtle.with_alpha(FRAME_SCROLLBAR_SUBTLE_TRACK_ALPHA)),
+        thumb_color: color(palette.control_muted.with_alpha(FRAME_SCROLLBAR_SUBTLE_THUMB_ALPHA)),
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(in crate::app) struct FrameScrollbarDrag {
     scroll_handle: ScrollHandle,
@@ -37,6 +76,34 @@ pub(in crate::app) fn frame_vertical_scrollbar(
     content_height: f32,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Stateful<gpui::Div> {
+    frame_vertical_scrollbar_styled(
+        id,
+        scroll_handle,
+        content_height,
+        frame_scrollbar_normal_style(palette),
+    )
+}
+
+pub(in crate::app) fn frame_vertical_scrollbar_subtle(
+    id: impl Into<String>,
+    scroll_handle: ScrollHandle,
+    content_height: f32,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Stateful<gpui::Div> {
+    frame_vertical_scrollbar_styled(
+        id,
+        scroll_handle,
+        content_height,
+        frame_scrollbar_subtle_style(palette),
+    )
+}
+
+fn frame_vertical_scrollbar_styled(
+    id: impl Into<String>,
+    scroll_handle: ScrollHandle,
+    content_height: f32,
+    style: FrameScrollbarStyle,
+) -> gpui::Stateful<gpui::Div> {
     let content_height = content_height.max(0.0);
     let drag = FrameScrollbarDrag {
         scroll_handle: scroll_handle.clone(),
@@ -50,7 +117,7 @@ pub(in crate::app) fn frame_vertical_scrollbar(
         .top_0()
         .right_0()
         .bottom_0()
-        .w(theme::ui_rem(FRAME_SCROLLBAR_WIDTH))
+        .w(theme::ui_rem(style.width))
         .cursor_default()
         .hover(gpui::Styled::cursor_pointer)
         .on_drag(drag, |_drag, _offset, window, cx| {
@@ -92,18 +159,18 @@ pub(in crate::app) fn frame_vertical_scrollbar(
                             viewport_height,
                             content_height,
                             paint_handle.offset().y.as_f32(),
-                            FRAME_SCROLLBAR_MIN_THUMB_HEIGHT * ui_scale,
+                            style.min_thumb_height * ui_scale,
                         ),
                         ui_scale,
                     }
                 },
-                |bounds, state, window, _cx| {
+                move |bounds, state, window, _cx| {
                     let Some(metrics) = state.metrics else {
                         return;
                     };
-                    let track_width = FRAME_SCROLLBAR_TRACK_WIDTH * state.ui_scale;
-                    let thumb_width = FRAME_SCROLLBAR_THUMB_WIDTH * state.ui_scale;
-                    let scrollbar_width = FRAME_SCROLLBAR_WIDTH * state.ui_scale;
+                    let track_width = style.track_width * state.ui_scale;
+                    let thumb_width = style.thumb_width * state.ui_scale;
+                    let scrollbar_width = style.width * state.ui_scale;
 
                     let track_bounds = Bounds::new(
                         point(
@@ -112,10 +179,7 @@ pub(in crate::app) fn frame_vertical_scrollbar(
                         ),
                         size(px(track_width), bounds.size.height),
                     );
-                    window.paint_quad(
-                        fill(track_bounds, color(palette.fill_subtle))
-                            .corner_radii(px(track_width / 2.0)),
-                    );
+                    window.paint_quad(fill(track_bounds, style.track_color).corner_radii(px(track_width / 2.0)));
 
                     let thumb_bounds = Bounds::new(
                         point(
@@ -124,10 +188,7 @@ pub(in crate::app) fn frame_vertical_scrollbar(
                         ),
                         size(px(thumb_width), px(metrics.thumb_height)),
                     );
-                    window.paint_quad(
-                        fill(thumb_bounds, color(palette.control_muted))
-                            .corner_radii(px(thumb_width / 2.0)),
-                    );
+                    window.paint_quad(fill(thumb_bounds, style.thumb_color).corner_radii(px(thumb_width / 2.0)));
                 },
             )
             .size_full(),

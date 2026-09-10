@@ -1,15 +1,17 @@
 use super::{
-    ClickEvent, Context, ConversionConfig, DragMoveEvent, FocusHandle, FrameRoot, ParentElement,
-    Render, StatefulInteractiveElement, Styled, Window, apply_image_jpeg_huffman,
-    apply_image_jpeg_quality, apply_image_png_compression, apply_image_png_prediction,
-    apply_image_tiff_compression, apply_image_webp_compression, apply_image_webp_lossless,
-    apply_image_webp_preset, apply_image_webp_quality, apply_pixel_format, color, div,
-    frame_choice_button, frame_list_item_with_caption, frame_slider, frame_slider_handle,
-    image_jpeg_huffman_options, image_png_prediction_options, image_tiff_compression_options,
-    image_webp_preset_options, range_fraction, range_value_for_key, range_value_from_fraction,
-    settings_field_label, settings_hint_text, settings_section, settings_value_badge,
-    settings_video_resolution_section, settings_video_scaling_section, theme,
-    timeline_slider_percent_from_bounds, video_pixel_format_options,
+    ClickEvent, Context, ConversionConfig, DragMoveEvent, FocusHandle, FrameRoot,
+    FrameTextInputKind, ParentElement, Render, SourceMetadata, StatefulInteractiveElement,
+    Styled, SettingsVideoSelectUi, VideoSelectId, VideoSelectRowState, Window,
+    apply_image_jpeg_huffman, apply_image_jpeg_quality, apply_image_png_compression,
+    apply_image_png_prediction, apply_image_tiff_compression, apply_image_webp_compression,
+    apply_image_webp_lossless, apply_image_webp_preset, apply_image_webp_quality,
+    apply_pixel_format, color, div, frame_choice_button, frame_list_item_with_caption,
+    frame_slider, frame_slider_handle, image_jpeg_huffman_options, image_png_prediction_options,
+    image_tiff_compression_options, image_webp_preset_options, range_fraction,
+    range_value_for_key, range_value_from_fraction, resolution_label, scaling_algorithm_label,
+    settings_dimension_row, settings_field_label, settings_hint_text, settings_section,
+    settings_value_badge, theme, timeline_slider_percent_from_bounds, video_pixel_format_options,
+    video_resolution_select_options, video_scaling_select_options, video_select_row,
 };
 use gpui::{AppContext, InteractiveElement, prelude::FluentBuilder};
 
@@ -41,30 +43,70 @@ pub(in crate::app) fn settings_images_tab(
     settings_disabled: bool,
     video_width_focus: Option<&FocusHandle>,
     video_height_focus: Option<&FocusHandle>,
+    resolution_select: SettingsVideoSelectUi<'_>,
+    scaling_select: SettingsVideoSelectUi<'_>,
+    metadata: Option<&SourceMetadata>,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap_4()
-        .child(settings_video_resolution_section(
-            config,
-            settings_disabled,
-            video_width_focus,
-            video_height_focus,
+    let mut content = div().flex().flex_col().gap_4().child(video_select_row(
+        VideoSelectRowState {
+            id: VideoSelectId::Resolution,
+            options: video_resolution_select_options(config, settings_disabled, metadata),
+            selected_label: resolution_label(&config.resolution).to_string(),
+            enabled: !settings_disabled,
+            tooltip_visible_id: None,
             palette,
-            window,
-            cx,
-        ))
-        .child(settings_video_scaling_section(
-            config,
-            settings_disabled,
+            ui: resolution_select,
+        },
+        window,
+        cx,
+    ));
+
+    if config.resolution == "custom" {
+        content = content
+            .child(settings_dimension_row(
+                "宽度",
+                "settings-video-width-field",
+                config.custom_width.as_deref().unwrap_or_default(),
+                "1920",
+                settings_disabled,
+                video_width_focus,
+                FrameTextInputKind::VideoCustomWidth,
+                palette,
+                window,
+                cx,
+            ))
+            .child(settings_dimension_row(
+                "高度",
+                "settings-video-height-field",
+                config.custom_height.as_deref().unwrap_or_default(),
+                "1080",
+                settings_disabled,
+                video_height_focus,
+                FrameTextInputKind::VideoCustomHeight,
+                palette,
+                window,
+                cx,
+            ));
+    }
+
+    content = content.child(video_select_row(
+        VideoSelectRowState {
+            id: VideoSelectId::Scaling,
+            options: video_scaling_select_options(config, settings_disabled),
+            selected_label: scaling_algorithm_label(&config.scaling_algorithm).to_string(),
+            enabled: !settings_disabled && config.resolution != "original",
+            tooltip_visible_id: None,
             palette,
-            window,
-            cx,
-        ))
+            ui: scaling_select,
+        },
+        window,
+        cx,
+    ));
+
+    content
         .child(settings_images_pixel_format_section(
             config,
             settings_disabled,

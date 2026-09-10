@@ -6,7 +6,7 @@ use super::{
     apply_accessible_select_option_with_focus, apply_accessible_select_trigger,
     apply_accessible_select_trigger_with_focus, apply_button_motion, assets, button_colors,
     button_highlight_shadows, button_mouse_down, card_surface_shadows, color, div, icon_svg,
-    input_highlight_shadows, parse_hex, theme,
+    input_highlight_shadows, parse_hex, theme, Rgba,
 };
 use crate::app::accessibility::handle_modal_tab_navigation;
 use crate::numeric::usize_to_f32;
@@ -15,6 +15,7 @@ use gpui::FocusHandle;
 pub(in crate::app) const FRAME_SELECT_MAX_HEIGHT: f32 = 192.0;
 pub(in crate::app) const FRAME_SELECT_CONTENT_PADDING: f32 = 4.0;
 pub(in crate::app) const FRAME_SELECT_OPTION_HEIGHT: f32 = 28.0;
+pub(in crate::app) const FRAME_SELECT_VALUE_INDENT: f32 = 8.0;
 pub(in crate::app) const FRAME_COLOR_SWATCH_SIZE: f32 = 14.0;
 
 #[expect(
@@ -462,6 +463,108 @@ fn frame_select_option_inner(
                 color(palette.text_primary),
             ))
         });
+
+    if let Some(focus) = focus {
+        apply_accessible_select_option_with_focus(option, label, enabled, selected, focus, palette)
+    } else {
+        apply_accessible_select_option(option, label, enabled, selected, palette)
+    }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Captioned select options mirror the single-line builder plus a right-aligned caption."
+)]
+pub(in crate::app) fn frame_select_option_with_caption(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    caption: impl Into<String>,
+    selected: bool,
+    enabled: bool,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Stateful<gpui::Div> {
+    frame_select_option_caption_inner(id, label, caption, selected, enabled, None, palette)
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Captioned select options mirror the single-line builder plus a right-aligned caption and focus handle."
+)]
+pub(in crate::app) fn frame_select_option_with_caption_and_focus(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    caption: impl Into<String>,
+    selected: bool,
+    enabled: bool,
+    focus: &FocusHandle,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Stateful<gpui::Div> {
+    frame_select_option_caption_inner(
+        id,
+        label,
+        caption,
+        selected,
+        enabled,
+        Some(focus),
+        palette,
+    )
+}
+
+fn frame_select_option_caption_inner(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    caption: impl Into<String>,
+    selected: bool,
+    enabled: bool,
+    focus: Option<&FocusHandle>,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Stateful<gpui::Div> {
+    let label = label.into();
+    let display_label = theme::ui_text_owned(label.clone());
+    let display_caption = theme::ui_text_owned(caption.into());
+    let muted = color(palette.text_muted);
+    let caption_color = Rgba {
+        a: muted.a * 0.6,
+        ..muted
+    };
+
+    let option = div()
+        .id(id.into())
+        .min_h(theme::ui_rem(FRAME_SELECT_OPTION_HEIGHT))
+        .w_full()
+        .flex()
+        .items_center()
+        .gap_2()
+        .rounded(theme::ui_rem(theme::RADIUS_XS))
+        .pl(theme::ui_rem(
+            10.0 + FRAME_SELECT_VALUE_INDENT - FRAME_SELECT_CONTENT_PADDING,
+        ))
+        .pr(theme::ui_rem(12.0))
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(color(palette.text_primary))
+        .opacity(if enabled { 1.0 } else { 0.5 })
+        .when(selected, |this| this.bg(color(palette.fill_subtle)))
+        .when(enabled, |this| {
+            this.hover(|style| style.bg(color(palette.fill_subtle)).cursor_pointer())
+        })
+        .when(!enabled, gpui::Styled::cursor_not_allowed)
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            cx.stop_propagation();
+            button_mouse_down(enabled, window, cx);
+        })
+        .child(div().flex_1().min_w_0().truncate().child(display_label))
+        .child(
+            div()
+                .flex_none()
+                .max_w(theme::ui_rem(140.0))
+                .truncate()
+                .text_right()
+                .text_size(theme::ui_rem(10.0))
+                .font_weight(theme::TEXT_WEIGHT_REGULAR)
+                .text_color(caption_color)
+                .child(display_caption),
+        );
 
     if let Some(focus) = focus {
         apply_accessible_select_option_with_focus(option, label, enabled, selected, focus, palette)
