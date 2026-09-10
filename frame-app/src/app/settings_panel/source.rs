@@ -124,6 +124,10 @@ pub(in crate::app) fn settings_section_label(
     label: &'static str,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Div {
+    const SECTION_TITLE_ALPHA: f32 = 0.80;
+
+    let mut text_color = color(palette.text_primary);
+    text_color.a *= SECTION_TITLE_ALPHA;
     div()
         .w_full()
         .flex()
@@ -131,7 +135,7 @@ pub(in crate::app) fn settings_section_label(
         .gap_1()
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
         .font_weight(theme::TEXT_WEIGHT_MEDIUM)
-        .text_color(color(palette.text_muted))
+        .text_color(text_color)
         .child(theme::ui_text(label))
         .child(
             div()

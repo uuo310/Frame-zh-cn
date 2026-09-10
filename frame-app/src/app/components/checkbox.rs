@@ -102,7 +102,24 @@ pub(in crate::app) fn frame_checkbox_row(
     action: impl Fn(&mut FrameRoot, &ClickEvent, &mut Window, &mut Context<FrameRoot>) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
     frame_checkbox_row_inner(
-        id, label, hint, checked, disabled, None, palette, cx, action,
+        id, label, hint, checked, disabled, None, false, palette, cx, action,
+    )
+}
+
+/// Same as [`frame_checkbox_row`] but the hint sits after the label on one
+/// line, one size smaller, instead of stacked below it.
+pub(in crate::app) fn frame_checkbox_row_inline_hint(
+    id: impl Into<String>,
+    label: impl Into<String>,
+    hint: impl Into<String>,
+    checked: bool,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    cx: &Context<FrameRoot>,
+    action: impl Fn(&mut FrameRoot, &ClickEvent, &mut Window, &mut Context<FrameRoot>) + 'static,
+) -> gpui::Stateful<gpui::Div> {
+    frame_checkbox_row_inner(
+        id, label, hint, checked, disabled, None, true, palette, cx, action,
     )
 }
 
@@ -128,6 +145,7 @@ pub(in crate::app) fn frame_checkbox_row_with_focus(
         checked,
         disabled,
         Some(focus),
+        false,
         palette,
         cx,
         action,
@@ -145,10 +163,13 @@ fn frame_checkbox_row_inner(
     checked: bool,
     disabled: bool,
     focus: Option<&FocusHandle>,
+    hint_inline: bool,
     palette: &'static theme::ThemePalette,
     cx: &Context<FrameRoot>,
     action: impl Fn(&mut FrameRoot, &ClickEvent, &mut Window, &mut Context<FrameRoot>) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
+    const FRAME_CHECKBOX_HINT_SIZE: f32 = 11.0;
+
     let id = id.into();
     let label = label.into();
     let display_label = theme::ui_text_owned(label.clone());
@@ -174,6 +195,33 @@ fn frame_checkbox_row_inner(
         apply_accessible_checkbox(indicator, label, enabled, checked, false, palette)
     };
 
+    let label_text = div()
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(color(palette.text_muted))
+        .child(display_label);
+    let hint_text = div()
+        .text_size(theme::ui_rem(FRAME_CHECKBOX_HINT_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_REGULAR)
+        .text_color(color(palette.text_muted))
+        .child(hint);
+    let text_block = if hint_inline {
+        div()
+            .flex()
+            .items_center()
+            .gap_2()
+            .min_w_0()
+            .child(label_text)
+            .when(has_hint, |this| this.child(hint_text))
+    } else {
+        div()
+            .flex()
+            .flex_col()
+            .when(has_hint, gpui::Styled::gap_1)
+            .child(label_text)
+            .when(has_hint, |this| this.child(hint_text))
+    };
+
     div()
         .id(id)
         .flex()
@@ -190,26 +238,5 @@ fn frame_checkbox_row_inner(
             row_action(root, event, window, cx);
         }))
         .child(indicator)
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .when(has_hint, gpui::Styled::gap_1)
-                .child(
-                    div()
-                        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-                        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
-                        .text_color(color(palette.text_muted))
-                        .child(display_label),
-                )
-                .when(has_hint, |this| {
-                    this.child(
-                        div()
-                            .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-                            .font_weight(theme::TEXT_WEIGHT_REGULAR)
-                            .text_color(color(palette.text_muted))
-                            .child(hint),
-                    )
-                }),
-        )
+        .child(text_block)
 }

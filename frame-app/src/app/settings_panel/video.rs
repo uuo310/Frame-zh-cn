@@ -901,7 +901,9 @@ fn settings_video_checkbox_row(
     cx: &Context<FrameRoot>,
     action: impl Fn(&mut FrameRoot, &ClickEvent, &mut Window, &mut Context<FrameRoot>) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
-    frame_checkbox_row(id, label, hint, checked, disabled, palette, cx, action)
+    frame_checkbox_row_inline_hint(
+        id, label, hint, checked, disabled, palette, cx, action,
+    )
 }
 
 pub(in crate::app) fn resolution_label(resolution: &str) -> &'static str {

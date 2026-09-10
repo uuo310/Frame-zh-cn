@@ -37,8 +37,10 @@ pub(in crate::app) fn settings_hint_text(
     text: &'static str,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Div {
+    const SETTINGS_HINT_TEXT_SIZE: f32 = 11.0;
+
     div()
-        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .text_size(theme::ui_rem(SETTINGS_HINT_TEXT_SIZE))
         .text_color(color(palette.text_muted))
         .child(theme::ui_text(text))
 }
