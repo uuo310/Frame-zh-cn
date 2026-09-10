@@ -11,8 +11,8 @@ use super::components::{
 };
 use super::input::{FrameTextInputSpec, frame_text_input};
 use super::primitives::{
-    ButtonVariant, action_button, animated_button_colors, button_colors, card_surface_shadows,
-    color, icon_svg,
+    ButtonVariant, action_button, animated_button_colors, apply_button_motion, button_colors,
+    card_surface_shadows, color, icon_svg,
 };
 use super::{
     ClickEvent, Context, FocusHandle, FrameRoot, FrameTextInputKind, InteractiveElement,
@@ -279,14 +279,17 @@ fn titlebar_preset_button_with_popover(
                 .text_color(animated.foreground)
                 .child("▾"),
         )
-        .on_mouse_down(MouseButton::Left, |_, _window, cx| {
-            cx.stop_propagation();
-        })
         .on_click(cx.listener(|root, _: &ClickEvent, _window, cx| {
             cx.stop_propagation();
             root.toggle_preset_menu();
             cx.notify();
         }));
+    let trigger = apply_button_motion(trigger, animated.motion, true).on_mouse_down(
+        MouseButton::Left,
+        |_, _window, cx| {
+            cx.stop_propagation();
+        },
+    );
 
     let mut wrapper = div().relative().flex().items_center().child(trigger);
 
