@@ -8,7 +8,6 @@ use std::time::Instant;
 
 const TOOLTIP_HOVER_DELAY: Duration = Duration::from_millis(500);
 const TOOLTIP_HYSTERESIS_WINDOW: Duration = Duration::from_millis(300);
-const TOOLTIP_OFFSET: f32 = 6.0;
 const TOOLTIP_ENTER_DISTANCE: f32 = 4.0;
 const TOOLTIP_DEFERRED_PRIORITY: usize = 20;
 
@@ -16,6 +15,8 @@ pub(in crate::app) fn frame_tooltip(
     id: impl Into<String>,
     label: impl Into<String>,
     is_visible: bool,
+    bubble_bottom: f32,
+    align_start: bool,
     child: impl IntoElement,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
@@ -54,12 +55,13 @@ pub(in crate::app) fn frame_tooltip(
                         .absolute()
                         .bottom(theme::ui_rem((progress - 1.0).mul_add(
                             TOOLTIP_ENTER_DISTANCE,
-                            super::super::SETTINGS_TAB_BUTTON_SIZE + TOOLTIP_OFFSET,
+                            bubble_bottom,
                         )))
                         .left_0()
                         .right_0()
                         .flex()
-                        .justify_center()
+                        .when(align_start, |this| this.justify_start())
+                        .when(!align_start, |this| this.justify_center())
                         .child(
                             div()
                                 .flex_none()

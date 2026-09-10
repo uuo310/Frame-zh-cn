@@ -225,6 +225,8 @@ pub(in crate::app) fn settings_tab_button(
         tab.id(),
         tab.label(),
         tooltip_visible_id == Some(tab.id()),
+        crate::SETTINGS_TAB_BUTTON_SIZE + 6.0,
+        false,
         button,
         palette,
         window,

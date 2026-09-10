@@ -28,6 +28,9 @@ const VIDEO_SELECT_POPOVER_TOP_OFFSET: f32 =
 const VIDEO_SELECT_POPOVER_TOP_BUFFER: f32 = 8.0;
 const VIDEO_SELECT_POPOVER_MAX_HEIGHT: f32 = 320.0;
 const VIDEO_SELECT_POPOVER_MIN_HEIGHT: f32 = 96.0;
+/// Tooltip bubble bottom (rem above the label text box) for the row-label hint;
+/// keeps the bubble inside the inter-row gap, just above the label.
+const VIDEO_SELECT_LABEL_TOOLTIP_BOTTOM: f32 = 24.0;
 
 /// Form-row selects that replace the old stacked radio-list sections in the video tab.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -452,6 +455,8 @@ pub(in crate::app) fn video_select_row(
             id.tooltip_id(),
             hint,
             tooltip_visible_id == Some(id.tooltip_id()),
+            VIDEO_SELECT_LABEL_TOOLTIP_BOTTOM,
+            true,
             label_text,
             palette,
             window,
