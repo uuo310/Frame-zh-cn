@@ -222,7 +222,7 @@ fn settings_audio_bitrate_mode_grid(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let mut grid = div().grid().grid_cols(2).gap_2();
-    for (mode, label) in [("bitrate", "指定码率"), ("vbr", "可变码率")] {
+    for (mode, label) in [("bitrate", "目标码率"), ("vbr", "可变码率")] {
         let selected = config.audio_bitrate_mode == mode;
         let enabled =
             !disabled && (mode == "bitrate" || audio_codec_supports_vbr(&config.audio_codec));
