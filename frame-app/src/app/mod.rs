@@ -129,7 +129,8 @@ use crate::{
         apply_quality, apply_subtitle_burn_path,
         apply_subtitle_font_color, apply_subtitle_font_name, apply_subtitle_font_size,
         apply_subtitle_outline_color, apply_subtitle_position, apply_trim_times,
-        apply_video_bitrate, apply_video_bitrate_mode,
+        apply_video_bitrate, apply_video_bitrate_mode, apply_video_bufsize, apply_video_maxrate,
+        apply_video_vbv_enabled,
         apply_videotoolbox_allow_sw, audio_channel_options, audio_codec_options,
         audio_codec_supports_vbr, audio_quality_range, audio_track_options, create_custom_preset,
         default_presets, fps_options, gif_color_options, gif_dither_options,
@@ -843,6 +844,8 @@ struct SettingsRenderState<'a> {
     video_width_focus: Option<&'a FocusHandle>,
     video_height_focus: Option<&'a FocusHandle>,
     video_bitrate_focus: Option<&'a FocusHandle>,
+    video_maxrate_focus: Option<&'a FocusHandle>,
+    video_bufsize_focus: Option<&'a FocusHandle>,
     gif_loop_focus: Option<&'a FocusHandle>,
     video_pixel_format_select: SettingsVideoSelectUi<'a>,
     video_codec_select: SettingsVideoSelectUi<'a>,
@@ -879,6 +882,8 @@ struct SettingsVideoInputFocuses<'a> {
     width: Option<&'a FocusHandle>,
     height: Option<&'a FocusHandle>,
     bitrate: Option<&'a FocusHandle>,
+    maxrate: Option<&'a FocusHandle>,
+    bufsize: Option<&'a FocusHandle>,
     gif_loop: Option<&'a FocusHandle>,
 }
 

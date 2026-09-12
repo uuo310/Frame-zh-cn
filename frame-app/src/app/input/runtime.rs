@@ -28,6 +28,8 @@ pub(in crate::app) enum FrameTextInputKind {
     VideoCustomWidth,
     VideoCustomHeight,
     VideoBitrate,
+    VideoMaxrate,
+    VideoBufsize,
     GifLoop,
     PreviewStartTime,
     PreviewEndTime,
@@ -47,13 +49,15 @@ pub(in crate::app) enum FrameTextInputKind {
 }
 
 impl FrameTextInputKind {
-    pub(in crate::app) const ALL: [Self; 22] = [
+    pub(in crate::app) const ALL: [Self; 24] = [
         Self::MaxConcurrency,
         Self::OutputName,
         Self::AudioBitrate,
         Self::VideoCustomWidth,
         Self::VideoCustomHeight,
         Self::VideoBitrate,
+        Self::VideoMaxrate,
+        Self::VideoBufsize,
         Self::GifLoop,
         Self::PreviewStartTime,
         Self::PreviewEndTime,
@@ -74,33 +78,50 @@ impl FrameTextInputKind {
 
     pub(in crate::app) const fn accessibility_label(self) -> &'static str {
         match self {
-            Self::MaxConcurrency => "Maximum concurrent conversions",
-            Self::OutputName => "Output name",
-            Self::AudioBitrate => "Audio bitrate",
-            Self::VideoCustomWidth => "Video width",
-            Self::VideoCustomHeight => "Video height",
-            Self::VideoBitrate => "Video bitrate",
-            Self::GifLoop => "GIF loop count",
-            Self::PreviewStartTime => "Preview start time",
-            Self::PreviewEndTime => "Preview end time",
-            Self::MetadataTitle => "Metadata title",
-            Self::MetadataArtist => "Metadata artist",
-            Self::MetadataAlbum => "Metadata album",
-            Self::MetadataGenre => "Metadata genre",
-            Self::MetadataDate => "Metadata date",
-            Self::MetadataComment => "Metadata comment",
-            Self::MetadataServiceName => "MPEG transport stream service name",
-            Self::MetadataServiceProvider => "MPEG transport stream service provider",
-            Self::PresetName => "Preset name",
-            Self::ExternalSubtitleLanguage => "Selectable subtitle language",
-            Self::ExternalSubtitleTitle => "Selectable subtitle title",
-            Self::SubtitleFontColorHex => "Subtitle font color",
-            Self::SubtitleOutlineColorHex => "Subtitle outline color",
+            Self::MaxConcurrency => "最大并发数",
+            Self::OutputName => "输出名称",
+            Self::AudioBitrate => "音频码率",
+            Self::VideoCustomWidth => "视频宽度",
+            Self::VideoCustomHeight => "视频高度",
+            Self::VideoBitrate => "视频码率",
+            Self::VideoMaxrate => "视频最大码率",
+            Self::VideoBufsize => "视频 VBV 缓冲大小",
+            Self::GifLoop => "GIF 循环次数",
+            Self::PreviewStartTime => "预览开始时间",
+            Self::PreviewEndTime => "预览结束时间",
+            Self::MetadataTitle => "元数据标题",
+            Self::MetadataArtist => "元数据艺术家",
+            Self::MetadataAlbum => "元数据专辑",
+            Self::MetadataGenre => "元数据流派",
+            Self::MetadataDate => "元数据日期 / 年份",
+            Self::MetadataComment => "元数据注释",
+            Self::MetadataServiceName => "MPEG 传输流服务名称",
+            Self::MetadataServiceProvider => "MPEG 传输流服务提供商",
+            Self::PresetName => "预设名称",
+            Self::ExternalSubtitleLanguage => "可选字幕语言",
+            Self::ExternalSubtitleTitle => "可选字幕标题",
+            Self::SubtitleFontColorHex => "字幕字体颜色",
+            Self::SubtitleOutlineColorHex => "字幕描边颜色",
         }
     }
 
     pub(in crate::app) const fn is_preview_timecode(self) -> bool {
         matches!(self, Self::PreviewStartTime | Self::PreviewEndTime)
+    }
+
+    /// 元数据页的可编辑字段（含 MPEG-TS 的服务名称/服务提供商），用于把占位提示限定为斜体。
+    pub(in crate::app) const fn is_metadata_field(self) -> bool {
+        matches!(
+            self,
+            Self::MetadataTitle
+                | Self::MetadataArtist
+                | Self::MetadataAlbum
+                | Self::MetadataGenre
+                | Self::MetadataDate
+                | Self::MetadataComment
+                | Self::MetadataServiceName
+                | Self::MetadataServiceProvider
+        )
     }
 }
 
@@ -200,6 +221,8 @@ pub(in crate::app) struct FrameTextInputStore {
     video_width: FrameTextInputRuntime,
     video_height: FrameTextInputRuntime,
     video_bitrate: FrameTextInputRuntime,
+    video_maxrate: FrameTextInputRuntime,
+    video_bufsize: FrameTextInputRuntime,
     gif_loop: FrameTextInputRuntime,
     preview_start_time: FrameTextInputRuntime,
     preview_end_time: FrameTextInputRuntime,
@@ -227,6 +250,8 @@ impl FrameTextInputStore {
             FrameTextInputKind::VideoCustomWidth => &self.video_width,
             FrameTextInputKind::VideoCustomHeight => &self.video_height,
             FrameTextInputKind::VideoBitrate => &self.video_bitrate,
+            FrameTextInputKind::VideoMaxrate => &self.video_maxrate,
+            FrameTextInputKind::VideoBufsize => &self.video_bufsize,
             FrameTextInputKind::GifLoop => &self.gif_loop,
             FrameTextInputKind::PreviewStartTime => &self.preview_start_time,
             FrameTextInputKind::PreviewEndTime => &self.preview_end_time,
@@ -257,6 +282,8 @@ impl FrameTextInputStore {
             FrameTextInputKind::VideoCustomWidth => &mut self.video_width,
             FrameTextInputKind::VideoCustomHeight => &mut self.video_height,
             FrameTextInputKind::VideoBitrate => &mut self.video_bitrate,
+            FrameTextInputKind::VideoMaxrate => &mut self.video_maxrate,
+            FrameTextInputKind::VideoBufsize => &mut self.video_bufsize,
             FrameTextInputKind::GifLoop => &mut self.gif_loop,
             FrameTextInputKind::PreviewStartTime => &mut self.preview_start_time,
             FrameTextInputKind::PreviewEndTime => &mut self.preview_end_time,
@@ -285,6 +312,8 @@ pub(in crate::app) struct FrameTextInputFocusStore {
     video_width: Option<FocusHandle>,
     video_height: Option<FocusHandle>,
     video_bitrate: Option<FocusHandle>,
+    video_maxrate: Option<FocusHandle>,
+    video_bufsize: Option<FocusHandle>,
     gif_loop: Option<FocusHandle>,
     preview_start_time: Option<FocusHandle>,
     preview_end_time: Option<FocusHandle>,
@@ -312,6 +341,8 @@ impl FrameTextInputFocusStore {
             FrameTextInputKind::VideoCustomWidth => self.video_width.as_ref(),
             FrameTextInputKind::VideoCustomHeight => self.video_height.as_ref(),
             FrameTextInputKind::VideoBitrate => self.video_bitrate.as_ref(),
+            FrameTextInputKind::VideoMaxrate => self.video_maxrate.as_ref(),
+            FrameTextInputKind::VideoBufsize => self.video_bufsize.as_ref(),
             FrameTextInputKind::GifLoop => self.gif_loop.as_ref(),
             FrameTextInputKind::PreviewStartTime => self.preview_start_time.as_ref(),
             FrameTextInputKind::PreviewEndTime => self.preview_end_time.as_ref(),
@@ -344,6 +375,8 @@ impl FrameTextInputFocusStore {
             FrameTextInputKind::VideoCustomWidth => &mut self.video_width,
             FrameTextInputKind::VideoCustomHeight => &mut self.video_height,
             FrameTextInputKind::VideoBitrate => &mut self.video_bitrate,
+            FrameTextInputKind::VideoMaxrate => &mut self.video_maxrate,
+            FrameTextInputKind::VideoBufsize => &mut self.video_bufsize,
             FrameTextInputKind::GifLoop => &mut self.gif_loop,
             FrameTextInputKind::PreviewStartTime => &mut self.preview_start_time,
             FrameTextInputKind::PreviewEndTime => &mut self.preview_end_time,

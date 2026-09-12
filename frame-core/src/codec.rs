@@ -32,8 +32,24 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
     }
 
     if config.video_bitrate_mode == "bitrate" {
+        // NVENC：显式声明 vbr 率控模式（与默认行为一致，但自解释）。软编无需 -rc。
+        if is_nvenc {
+            args.push("-rc:v".to_string());
+            args.push("vbr".to_string());
+        }
         args.push("-b:v".to_string());
         args.push(format!("{}k", config.video_bitrate));
+        // 受限码率：maxrate/bufsize 非空才发；空 = 平均码率（不设峰值）。
+        let maxrate = config.video_maxrate.trim();
+        if !maxrate.is_empty() {
+            args.push("-maxrate".to_string());
+            args.push(format!("{maxrate}k"));
+        }
+        let bufsize = config.video_bufsize.trim();
+        if !bufsize.is_empty() {
+            args.push("-bufsize".to_string());
+            args.push(format!("{bufsize}k"));
+        }
     } else if is_nvenc {
         let cq = 52_u32.saturating_sub(config.quality / 2).clamp(1, 51);
         args.push("-rc:v".to_string());

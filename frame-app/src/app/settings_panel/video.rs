@@ -249,7 +249,7 @@ pub(in crate::app) fn settings_video_tab(
         .child(settings_video_quality_section(
             config,
             settings_disabled,
-            focuses.bitrate,
+            focuses,
             palette,
             window,
             cx,
@@ -505,7 +505,7 @@ fn settings_video_gif_loop_section(
 fn settings_video_quality_section(
     config: &ConversionConfig,
     settings_disabled: bool,
-    video_bitrate_focus: Option<&FocusHandle>,
+    focuses: SettingsVideoInputFocuses<'_>,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
@@ -561,27 +561,78 @@ fn settings_video_quality_section(
             cx,
         ));
     } else {
-        section = section.child(
-            div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .pt(theme::ui_rem(4.0))
-                .child(settings_field_label("指定码率 (kbps)", palette))
+        let vbv_enabled = !config.video_maxrate.is_empty();
+        let mut bitrate = div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .pt(theme::ui_rem(4.0))
+            .child(settings_field_label("平均码率 (kbps)", palette))
+            .child(frame_text_input(
+                FrameTextInputSpec {
+                    id: "settings-video-bitrate-field",
+                    value: &config.video_bitrate,
+                    placeholder: "5000",
+                    disabled: settings_disabled,
+                    focus: focuses.bitrate,
+                    kind: FrameTextInputKind::VideoBitrate,
+                },
+                palette,
+                window,
+                cx,
+            ))
+            .child(settings_video_checkbox_row(
+                "video-vbv-enable",
+                "启用码率约束",
+                "使用最大码率 / VBV 缓冲限制峰值",
+                vbv_enabled,
+                settings_disabled,
+                palette,
+                cx,
+                move |root, _event, _window, cx| {
+                    if settings_disabled {
+                        return;
+                    }
+                    if root.update_selected_config(|config| {
+                        let enable = config.video_maxrate.is_empty();
+                        apply_video_vbv_enabled(config, enable)
+                    }) {
+                        cx.notify();
+                    }
+                },
+            ));
+        if vbv_enabled {
+            bitrate = bitrate
+                .child(settings_field_label("最大码率 (kbps)", palette))
                 .child(frame_text_input(
                     FrameTextInputSpec {
-                        id: "settings-video-bitrate-field",
-                        value: &config.video_bitrate,
-                        placeholder: "5000",
+                        id: "settings-video-maxrate-field",
+                        value: &config.video_maxrate,
+                        placeholder: "8000",
                         disabled: settings_disabled,
-                        focus: video_bitrate_focus,
-                        kind: FrameTextInputKind::VideoBitrate,
+                        focus: focuses.maxrate,
+                        kind: FrameTextInputKind::VideoMaxrate,
                     },
                     palette,
                     window,
                     cx,
-                )),
-        );
+                ))
+                .child(settings_field_label("VBV 缓冲 (kbit)", palette))
+                .child(frame_text_input(
+                    FrameTextInputSpec {
+                        id: "settings-video-bufsize-field",
+                        value: &config.video_bufsize,
+                        placeholder: "16000",
+                        disabled: settings_disabled,
+                        focus: focuses.bufsize,
+                        kind: FrameTextInputKind::VideoBufsize,
+                    },
+                    palette,
+                    window,
+                    cx,
+                ));
+        }
+        section = section.child(bitrate);
     }
 
     section
@@ -595,7 +646,7 @@ fn settings_video_bitrate_mode_grid(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let mut grid = div().grid().grid_cols(2).gap_2();
-    for (mode, label) in [("crf", "恒定质量"), ("bitrate", "指定码率")] {
+    for (mode, label) in [("crf", "恒定质量"), ("bitrate", "目标码率")] {
         grid = grid.child(
             frame_choice_button(
                 format!("video-bitrate-mode-{mode}"),

@@ -580,6 +580,50 @@ pub fn apply_video_bitrate(config: &mut ConversionConfig, bitrate: &str) -> bool
     true
 }
 
+pub fn apply_video_maxrate(config: &mut ConversionConfig, value: &str) -> bool {
+    let value: String = value.chars().filter(char::is_ascii_digit).collect();
+    if config.video_maxrate == value {
+        return false;
+    }
+
+    config.video_maxrate = value;
+    true
+}
+
+pub fn apply_video_bufsize(config: &mut ConversionConfig, value: &str) -> bool {
+    let value: String = value.chars().filter(char::is_ascii_digit).collect();
+    if config.video_bufsize == value {
+        return false;
+    }
+
+    config.video_bufsize = value;
+    true
+}
+
+/// 启用/停用"码率约束"（受限码率）。启用时若峰值/缓冲未填，按目标码率预填默认值；停用时清空。
+pub fn apply_video_vbv_enabled(config: &mut ConversionConfig, enabled: bool) -> bool {
+    if enabled {
+        if !config.video_maxrate.is_empty() && !config.video_bufsize.is_empty() {
+            return false;
+        }
+        let target = config.video_bitrate.parse::<u32>().unwrap_or(5000);
+        let maxrate = (f64::from(target) * 1.45).round() as u32;
+        let bufsize = maxrate * 2;
+        let changed =
+            config.video_maxrate != maxrate.to_string() || config.video_bufsize != bufsize.to_string();
+        config.video_maxrate = maxrate.to_string();
+        config.video_bufsize = bufsize.to_string();
+        changed
+    } else {
+        if config.video_maxrate.is_empty() && config.video_bufsize.is_empty() {
+            return false;
+        }
+        config.video_maxrate.clear();
+        config.video_bufsize.clear();
+        true
+    }
+}
+
 pub fn apply_crf(config: &mut ConversionConfig, crf: u8) -> bool {
     let crf = crf.min(51);
     if config.crf == crf {

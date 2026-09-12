@@ -51,6 +51,8 @@ pub fn core_config_from_gpui(config: &GpuiConversionConfig) -> CoreConversionCon
         },
         video_bitrate_mode: non_empty_or(&config.video_bitrate_mode, DEFAULT_VIDEO_BITRATE_MODE),
         video_bitrate: non_empty_or(&config.video_bitrate, DEFAULT_VIDEO_BITRATE),
+        video_maxrate: config.video_maxrate.clone(),
+        video_bufsize: config.video_bufsize.clone(),
         audio_codec: config.audio_codec.clone(),
         audio_bitrate: non_empty_or(&config.audio_bitrate, DEFAULT_AUDIO_BITRATE),
         audio_bitrate_mode: non_empty_or(&config.audio_bitrate_mode, DEFAULT_AUDIO_BITRATE_MODE),

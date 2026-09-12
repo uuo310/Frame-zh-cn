@@ -296,6 +296,8 @@ pub(in crate::app) fn settings_tab_content(
                 width: settings.video_width_focus,
                 height: settings.video_height_focus,
                 bitrate: settings.video_bitrate_focus,
+                maxrate: settings.video_maxrate_focus,
+                bufsize: settings.video_bufsize_focus,
                 gif_loop: settings.gif_loop_focus,
             },
             settings.video_pixel_format_select,

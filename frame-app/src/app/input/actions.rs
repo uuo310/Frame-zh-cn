@@ -126,6 +126,14 @@ impl FrameRoot {
                 .file_queue
                 .selected_file()
                 .map_or_else(String::new, |file| file.config.video_bitrate.clone()),
+            FrameTextInputKind::VideoMaxrate => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.video_maxrate.clone()),
+            FrameTextInputKind::VideoBufsize => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.video_bufsize.clone()),
             FrameTextInputKind::GifLoop => self
                 .file_queue
                 .selected_file()
@@ -249,6 +257,26 @@ impl FrameRoot {
                 let next = sanitize_number_input(candidate);
                 self.file_queue.selected_file_mut().map(|file| {
                     apply_video_bitrate(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoMaxrate => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_number_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_video_maxrate(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoBufsize => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_number_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_video_bufsize(&mut file.config, &next);
                 })?;
                 Some(next)
             }

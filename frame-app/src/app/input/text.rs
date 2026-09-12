@@ -11,6 +11,8 @@ pub(super) fn sanitize_replacement_text(kind: FrameTextInputKind, value: &str) -
         | FrameTextInputKind::VideoCustomWidth
         | FrameTextInputKind::VideoCustomHeight
         | FrameTextInputKind::VideoBitrate
+        | FrameTextInputKind::VideoMaxrate
+        | FrameTextInputKind::VideoBufsize
         | FrameTextInputKind::GifLoop => sanitize_number_input(value),
         FrameTextInputKind::PreviewStartTime | FrameTextInputKind::PreviewEndTime => {
             sanitize_number_input(value)

@@ -158,6 +158,8 @@ fn core_config_from_gpui_preserves_active_conversion_fields() {
         video_codec: "libx265".to_string(),
         video_bitrate_mode: "bitrate".to_string(),
         video_bitrate: "9000".to_string(),
+        video_maxrate: "12000".to_string(),
+        video_bufsize: "24000".to_string(),
         resolution: "custom".to_string(),
         custom_width: Some("1920".to_string()),
         custom_height: Some("1080".to_string()),
@@ -196,6 +198,8 @@ fn core_config_from_gpui_preserves_active_conversion_fields() {
     assert_eq!(core.video_codec, "libx265");
     assert_eq!(core.video_bitrate_mode, "bitrate");
     assert_eq!(core.video_bitrate, "9000");
+    assert_eq!(core.video_maxrate, "12000");
+    assert_eq!(core.video_bufsize, "24000");
     assert_eq!(core.resolution, "custom");
     assert_eq!(core.custom_width.as_deref(), Some("1920"));
     assert_eq!(core.custom_height.as_deref(), Some("1080"));

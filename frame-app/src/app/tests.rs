@@ -4029,6 +4029,8 @@ mod preview_shell {
             video_width_focus: None,
             video_height_focus: None,
             video_bitrate_focus: None,
+            video_maxrate_focus: None,
+            video_bufsize_focus: None,
             gif_loop_focus: None,
             video_pixel_format_select: SettingsVideoSelectUi {
                 popover: PopoverState::Hidden,

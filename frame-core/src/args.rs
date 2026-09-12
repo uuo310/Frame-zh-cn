@@ -1365,6 +1365,8 @@ mod tests {
             video_codec: video_codec.to_string(),
             video_bitrate_mode: "crf".to_string(),
             video_bitrate: "5000".to_string(),
+            video_maxrate: String::new(),
+            video_bufsize: String::new(),
             audio_codec: "aac".to_string(),
             audio_bitrate: "128".to_string(),
             audio_bitrate_mode: "bitrate".to_string(),
@@ -1570,6 +1572,46 @@ mod tests {
             "-metadata",
             "service_provider=Provider"
         ));
+    }
+
+    #[test]
+    fn target_bitrate_emits_vbv_when_maxrate_and_bufsize_set() {
+        let mut config = sample_config("mp4", "libx264");
+        config.video_bitrate_mode = "bitrate".to_string();
+        config.video_bitrate = "5000".to_string();
+        config.video_maxrate = "8000".to_string();
+        config.video_bufsize = "16000".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &config);
+        assert!(args_contains_pair(&args, "-b:v", "5000k"));
+        assert!(args_contains_pair(&args, "-maxrate", "8000k"));
+        assert!(args_contains_pair(&args, "-bufsize", "16000k"));
+    }
+
+    #[test]
+    fn average_bitrate_omits_vbv_when_maxrate_empty() {
+        let mut config = sample_config("mp4", "libx264");
+        config.video_bitrate_mode = "bitrate".to_string();
+        config.video_bitrate = "5000".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &config);
+        assert!(args_contains_pair(&args, "-b:v", "5000k"));
+        assert!(!args.iter().any(|arg| arg == "-maxrate"));
+        assert!(!args.iter().any(|arg| arg == "-bufsize"));
+        assert!(!args.iter().any(|arg| arg == "-rc:v"));
+    }
+
+    #[test]
+    fn nvenc_bitrate_mode_declares_explicit_vbr_rc() {
+        let mut config = sample_config("mp4", "h264_nvenc");
+        config.video_bitrate_mode = "bitrate".to_string();
+        config.video_bitrate = "5000".to_string();
+        config.video_maxrate = "8000".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &config);
+        assert!(args_contains_pair(&args, "-rc:v", "vbr"));
+        assert!(args_contains_pair(&args, "-b:v", "5000k"));
+        assert!(args_contains_pair(&args, "-maxrate", "8000k"));
     }
 
     #[test]

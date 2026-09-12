@@ -382,6 +382,8 @@ mod tests {
             video_codec: "libx264".to_string(),
             video_bitrate_mode: "crf".to_string(),
             video_bitrate: "5000".to_string(),
+            video_maxrate: String::new(),
+            video_bufsize: String::new(),
             audio_codec: "aac".to_string(),
             audio_bitrate: "192".to_string(),
             audio_bitrate_mode: "bitrate".to_string(),
