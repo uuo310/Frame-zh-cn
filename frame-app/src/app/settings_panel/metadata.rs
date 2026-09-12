@@ -3,8 +3,14 @@ use super::{
     FrameTextInputSpec, MetadataField, ParentElement, SettingsMetadataInputFocuses, SourceMetadata,
     StatefulInteractiveElement, Styled, Window, apply_metadata_mode, div, frame_choice_button,
     frame_text_input, metadata_field_options, metadata_mode_description, metadata_mode_options,
-    settings_field_label, settings_hint_text, settings_section, theme,
+    settings_field_label_emphasized, settings_hint_text, settings_section, theme,
 };
+
+/// 元数据字段标签与其输入框之间的间距（设计像素）：约一个字身，单行常数逐轮微调。
+const METADATA_FIELD_LABEL_INPUT_GAP_PX: f32 = 12.0;
+
+/// 元数据字段标签最小宽度（设计像素）：容下最宽常规标签“艺术家”，使标题/艺术家/专辑/流派/注释的输入框左缘对齐；“日期 / 年份”更宽则自然外凸。单行常数逐轮微调。
+const METADATA_FIELD_LABEL_MIN_PX: f32 = 40.0;
 
 pub(in crate::app) fn settings_metadata_tab(
     config: &ConversionConfig,
@@ -100,22 +106,32 @@ fn settings_metadata_fields(
         fields = fields.child(
             div()
                 .flex()
-                .flex_col()
-                .gap_2()
-                .child(settings_field_label(option.label, palette))
-                .child(frame_text_input(
-                    FrameTextInputSpec {
-                        id: metadata_field_input_id(field),
-                        value: &value,
-                        placeholder: &placeholder,
-                        disabled: option.is_disabled,
-                        focus: metadata_field_focus(field, focuses),
-                        kind: metadata_field_input_kind(field),
-                    },
-                    palette,
-                    window,
-                    cx,
-                )),
+                .items_center()
+                .gap(theme::ui_rem(METADATA_FIELD_LABEL_INPUT_GAP_PX))
+                .child(
+                    div()
+                        .min_w(theme::ui_rem(METADATA_FIELD_LABEL_MIN_PX))
+                        .flex_shrink_0()
+                        .child(settings_field_label_emphasized(option.label, palette)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .child(frame_text_input(
+                            FrameTextInputSpec {
+                                id: metadata_field_input_id(field),
+                                value: &value,
+                                placeholder: &placeholder,
+                                disabled: option.is_disabled,
+                                focus: metadata_field_focus(field, focuses),
+                                kind: metadata_field_input_kind(field),
+                            },
+                            palette,
+                            window,
+                            cx,
+                        )),
+                ),
         );
     }
 

@@ -81,6 +81,7 @@ impl Element for FrameTextInputElement {
         } else {
             selected_range.end
         };
+        let focused = self.focus_handle.is_focused(window);
         let is_placeholder = content.is_empty();
         let display_text: SharedString = if is_placeholder {
             theme::ui_text(self.placeholder.as_ref()).into()
@@ -108,7 +109,6 @@ impl Element for FrameTextInputElement {
             .shape_line(display_text, font_size, &[run], None);
         let metrics = frame_text_input_metrics(root);
         let text_top = bounds.top() + (bounds.size.height - px(metrics.caret_height)) / 2.0;
-        let focused = self.focus_handle.is_focused(window);
         let should_reveal_cursor =
             focused && root.text_input_ui.active == Some(self.kind) && !is_placeholder;
         let cursor_x = line.x_for_index(cursor_offset);
@@ -236,6 +236,9 @@ pub(in crate::app) struct FrameTextInputSpec<'a> {
     pub(in crate::app) kind: FrameTextInputKind,
 }
 
+/// 元数据页提示（占位）文字字号（设计像素）：比常规输入文字小一号；仅提示，输入值不变。单行常数逐轮微调。
+const METADATA_HINT_TEXT_SIZE_PX: f32 = 11.0;
+
 #[expect(
     clippy::too_many_lines,
     reason = "The GPUI text input element keeps interaction handlers in one builder for predictable focus behavior."
@@ -255,6 +258,7 @@ pub(in crate::app) fn frame_text_input(
         kind,
     } = spec;
     let is_placeholder = value.is_empty();
+    let metadata_hint = kind.is_metadata_field() && is_placeholder;
     let label = if is_placeholder {
         theme::ui_text(placeholder)
     } else {
@@ -276,7 +280,11 @@ pub(in crate::app) fn frame_text_input(
         .rounded(theme::ui_rem(theme::RADIUS_SM))
         .bg(color(palette.canvas))
         .px(theme::ui_rem(10.0))
-        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .text_size(theme::ui_rem(if metadata_hint {
+            METADATA_HINT_TEXT_SIZE_PX
+        } else {
+            theme::TEXT_UI_BASE_SIZE
+        }))
         .text_color(color(label_color))
         .opacity(if disabled { 0.5 } else { 1.0 })
         .shadow(input_highlight_shadows(palette))
@@ -287,6 +295,7 @@ pub(in crate::app) fn frame_text_input(
         })
         .when(!disabled, gpui::Styled::cursor_text)
         .when(disabled, gpui::Styled::cursor_not_allowed)
+        .when(metadata_hint, gpui::Styled::italic)
         .when(!disabled, |this| {
             this.on_action(cx.listener(FrameRoot::text_input_backspace))
                 .on_action(cx.listener(FrameRoot::text_input_delete))

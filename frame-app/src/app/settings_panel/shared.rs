@@ -14,6 +14,23 @@ pub(in crate::app) fn settings_field_label(
         .child(theme::ui_text(label))
 }
 
+/// 元数据页字段标签亮度：介于 `text_muted`（深色≈α0.52）与节标题（α0.80）之间。
+/// 单行常数，供逐轮微调。
+const FIELD_LABEL_EMPHASIS_ALPHA: f32 = 0.62;
+
+pub(in crate::app) fn settings_field_label_emphasized(
+    label: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    let mut text_color = color(palette.text_primary);
+    text_color.a *= FIELD_LABEL_EMPHASIS_ALPHA;
+    div()
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(text_color)
+        .child(theme::ui_text(label))
+}
+
 pub(in crate::app) fn settings_value_badge(
     value: String,
     palette: &'static theme::ThemePalette,
