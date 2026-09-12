@@ -8,6 +8,7 @@ use crate::container::{
     TransportStreamProfile, is_transport_stream_container, transport_stream_profile,
 };
 use crate::error::ConversionError;
+use crate::hwaccel;
 use crate::filters::{
     build_audio_filters, build_encode_overlay_filter_complex, build_encode_video_filters,
     build_overlay_filter_complex, build_video_filters, has_overlay,
@@ -22,7 +23,7 @@ use crate::types::{
     AudioTrack, ConversionConfig, ExternalSubtitleTrack, MetadataConfig, MetadataMode,
     ProbeMetadata, SubtitleTrack, VOLUME_EPSILON,
 };
-use crate::utils::{get_hwaccel_args, is_audio_only_container, parse_time};
+use crate::utils::{is_audio_only_container, parse_time};
 
 fn is_copy_mode(config: &ConversionConfig) -> bool {
     config.processing_mode == "copy"
@@ -498,9 +499,8 @@ pub fn build_ffmpeg_args(
     let mut args = Vec::new();
 
     // Hardware decode acceleration (must be before -i)
-    if config.hw_decode {
-        args.extend(get_hwaccel_args(&config.video_codec));
-    }
+    let decode_plan = hwaccel::plan(config, probe);
+    args.extend(decode_plan.input_args);
 
     if let Some(start) = &config.start_time
         && !start.is_empty()
@@ -662,7 +662,12 @@ pub fn build_ffmpeg_args(
             args.push("-filter_complex".to_string());
             args.push(build_encode_overlay_filter_complex(config));
         } else {
-            let video_filters = build_encode_video_filters(config, true);
+            let video_filters = if decode_plan.frames_stay_in_vram {
+                // 显存帧接不了 CPU 滤镜：此时滤镜链本就为空，连偶数尺寸的 pad 也不能加。
+                build_video_filters(config, true)
+            } else {
+                build_encode_video_filters(config, true)
+            };
             if !video_filters.is_empty() {
                 args.push("-vf".to_string());
                 args.push(video_filters.join(","));
@@ -1357,6 +1362,73 @@ mod tests {
         path::PathBuf,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    #[test]
+    fn hardware_decode_falls_back_when_source_dimensions_are_unknown() {
+        let mut config = sample_config("mp4", "h264_nvenc");
+        config.hw_decode = true;
+
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &config, &sample_probe()).unwrap();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "-hwaccel" && pair[1] == "cuda"),
+            "解码仍应交给显卡：{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "-hwaccel_output_format"),
+            "源尺寸未知时不得要求帧留显存：{args:?}"
+        );
+        assert!(
+            args.iter().any(|arg| arg == "-vf"),
+            "退回路径应保留偶数尺寸护栏：{args:?}"
+        );
+    }
+
+    #[test]
+    fn hardware_decode_keeps_frames_in_vram_when_no_cpu_filter_is_needed() {
+        let mut config = sample_config("mp4", "h264_nvenc");
+        config.hw_decode = true;
+        let probe = ProbeMetadata {
+            width: Some(1920),
+            height: Some(1080),
+            ..sample_probe()
+        };
+
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &config, &probe).unwrap();
+
+        assert!(
+            args.iter().any(|arg| arg == "-hwaccel_output_format"),
+            "纯转码且源尺寸已偶数时应走帧留显存的快路：{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "-vf"),
+            "帧留显存时不得追加任何 CPU 滤镜（含 pad）：{args:?}"
+        );
+    }
+
+    #[test]
+    fn hardware_decode_drops_vram_residency_when_filters_are_needed() {
+        let mut config = sample_config("mp4", "h264_nvenc");
+        config.hw_decode = true;
+        config.resolution = "480p".to_string();
+        let probe = ProbeMetadata {
+            width: Some(1920),
+            height: Some(1080),
+            ..sample_probe()
+        };
+
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &config, &probe).unwrap();
+
+        assert!(
+            !args.iter().any(|arg| arg == "-hwaccel_output_format"),
+            "有 CPU 滤镜时不得要求帧留显存：{args:?}"
+        );
+        assert!(
+            args.iter().any(|arg| arg == "-vf"),
+            "缩放滤镜应仍然发出：{args:?}"
+        );
+    }
 
     fn sample_config(container: &str, video_codec: &str) -> ConversionConfig {
         ConversionConfig {
