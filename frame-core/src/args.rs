@@ -8,11 +8,11 @@ use crate::container::{
     TransportStreamProfile, is_transport_stream_container, transport_stream_profile,
 };
 use crate::error::ConversionError;
-use crate::hwaccel;
 use crate::filters::{
     build_audio_filters, build_encode_overlay_filter_complex, build_encode_video_filters,
     build_overlay_filter_complex, build_video_filters, has_overlay,
 };
+use crate::hwaccel;
 use crate::media_filters::validate_media_filters;
 use crate::media_rules::{
     all_containers, container_supports_audio, container_supports_subtitles, is_audio_codec_allowed,
@@ -20,8 +20,8 @@ use crate::media_rules::{
     is_video_only_container, is_video_pixel_format_allowed, is_video_stream_codec_allowed,
 };
 use crate::types::{
-    AudioTrack, ConversionConfig, ExternalSubtitleTrack, MetadataConfig, MetadataMode,
-    ProbeMetadata, SubtitleTrack, VOLUME_EPSILON,
+    AudioTrack, ConversionConfig, ExternalSubtitleTrack, HwDecodeBackend, MetadataConfig,
+    MetadataMode, ProbeMetadata, SubtitleTrack, VOLUME_EPSILON,
 };
 use crate::utils::{is_audio_only_container, parse_time};
 
@@ -480,10 +480,6 @@ pub fn validate_stream_copy_compatibility(
     Ok(())
 }
 
-#[expect(
-    clippy::too_many_lines,
-    reason = "FFmpeg command assembly stays in one place to keep ordering guarantees explicit"
-)]
 /// Builds probe-aware `FFmpeg` arguments for one conversion.
 ///
 /// # Errors
@@ -496,10 +492,32 @@ pub fn build_ffmpeg_args(
     config: &ConversionConfig,
     probe: &ProbeMetadata,
 ) -> Result<Vec<String>, ConversionError> {
+    build_ffmpeg_args_with_hwaccel(input, output, config, probe, HwDecodeBackend::default())
+}
+
+/// 同 [`build_ffmpeg_args`]，但额外告知本机可用的显卡解码后端。
+///
+/// 选硬件编码器时后端由编码器本身决定；选软件编码器时，只有这里传入了可用后端，
+/// 「硬件解码」勾选才会发出 `-hwaccel`。
+///
+/// # Errors
+///
+/// 与 [`build_ffmpeg_args`] 一致。
+#[expect(
+    clippy::too_many_lines,
+    reason = "FFmpeg command assembly stays in one place to keep ordering guarantees explicit"
+)]
+pub fn build_ffmpeg_args_with_hwaccel(
+    input: &str,
+    output: &str,
+    config: &ConversionConfig,
+    probe: &ProbeMetadata,
+    hw_decode_backend: HwDecodeBackend,
+) -> Result<Vec<String>, ConversionError> {
     let mut args = Vec::new();
 
     // Hardware decode acceleration (must be before -i)
-    let decode_plan = hwaccel::plan(config, probe);
+    let decode_plan = hwaccel::plan(config, probe, hw_decode_backend);
     args.extend(decode_plan.input_args);
 
     if let Some(start) = &config.start_time
@@ -1427,6 +1445,60 @@ mod tests {
         assert!(
             args.iter().any(|arg| arg == "-vf"),
             "缩放滤镜应仍然发出：{args:?}"
+        );
+    }
+
+    #[test]
+    fn software_encoder_uses_gpu_decode_when_backend_available() {
+        let mut config = sample_config("mp4", "libx264");
+        config.hw_decode = true;
+        let probe = ProbeMetadata {
+            width: Some(1920),
+            height: Some(1080),
+            ..sample_probe()
+        };
+
+        let args = build_ffmpeg_args_with_hwaccel(
+            "in.mp4",
+            "out.mp4",
+            &config,
+            &probe,
+            HwDecodeBackend::Cuda,
+        )
+        .unwrap();
+
+        assert!(
+            args.windows(2)
+                .any(|pair| pair[0] == "-hwaccel" && pair[1] == "cuda"),
+            "软件编码器也应能把解码交给显卡：{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "-hwaccel_output_format"),
+            "软件编码器读不到显存帧，不得要求帧留显存：{args:?}"
+        );
+        assert!(
+            args.iter().any(|arg| arg == "-vf"),
+            "滤镜链应保持原样：{args:?}"
+        );
+    }
+
+    #[test]
+    fn software_encoder_without_backend_ignores_hardware_decode() {
+        let mut config = sample_config("mp4", "libx264");
+        config.hw_decode = true;
+
+        let args = build_ffmpeg_args_with_hwaccel(
+            "in.mp4",
+            "out.mp4",
+            &config,
+            &sample_probe(),
+            HwDecodeBackend::None,
+        )
+        .unwrap();
+
+        assert!(
+            !args.iter().any(|arg| arg == "-hwaccel"),
+            "探测不到硬解后端时勾选不应产生任何输入段参数：{args:?}"
         );
     }
 

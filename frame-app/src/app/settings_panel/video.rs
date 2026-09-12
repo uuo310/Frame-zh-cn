@@ -1,5 +1,7 @@
 use super::*;
+use crate::capabilities::hw_decode_backend;
 use crate::numeric::u32_to_u8;
+use frame_core::types::HwDecodeBackend;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SettingsVideoRangeTarget {
@@ -270,14 +272,14 @@ pub(in crate::app) fn settings_video_tab(
                 cx,
             ))
         })
-        .when(is_hardware_video_codec(&config.video_codec), |this| {
-            this.child(settings_video_hw_section(
-                config,
-                settings_disabled,
-                palette,
-                cx,
-            ))
-        })
+        .child(settings_video_hw_section(
+            config,
+            settings_disabled,
+            is_hardware_video_codec(&config.video_codec),
+            !matches!(hw_decode_backend(available_encoders), HwDecodeBackend::None),
+            palette,
+            cx,
+        ))
 }
 
 pub(in crate::app) fn video_resolution_select_options(
@@ -916,19 +918,37 @@ fn settings_video_videotoolbox_section(
 fn settings_video_hw_section(
     config: &ConversionConfig,
     disabled: bool,
+    hardware_encoder: bool,
+    backend_available: bool,
     palette: &'static theme::ThemePalette,
     cx: &Context<FrameRoot>,
 ) -> gpui::Div {
-    settings_section("硬件加速", palette).child(settings_video_checkbox_row(
+    // 选硬件编码器时这一节管的是整条硬件流水线（拆包与装箱都在显卡）；
+    // 选软件编码器时它只管拆包，装箱仍由 CPU 完成，因此节名要分开。
+    let section_title = if hardware_encoder {
+        "硬件加速"
+    } else {
+        "硬件解码"
+    };
+    let hint = if !backend_available {
+        "本机未检测到可用的显卡解码器"
+    } else if hardware_encoder {
+        "使用 GPU 解码输入视频（更快）"
+    } else {
+        "使用 GPU 解码输入视频，降低 CPU 占用"
+    };
+    let row_disabled = disabled || !backend_available;
+
+    settings_section(section_title, palette).child(settings_video_checkbox_row(
         "video-hw-decode",
         "硬件解码",
-        "使用 GPU 解码输入视频（更快）",
+        hint,
         config.hw_decode,
-        disabled,
+        row_disabled,
         palette,
         cx,
         move |root, _event, _window, cx| {
-            if disabled {
+            if row_disabled {
                 return;
             }
             if root.update_selected_config(|config| apply_hw_decode(config, !config.hw_decode)) {

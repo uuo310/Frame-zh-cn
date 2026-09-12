@@ -16,11 +16,12 @@ impl FrameRoot {
         };
         self.normalize_selected_actionable_conversion_configs();
 
+        let hw_backend = crate::capabilities::hw_decode_backend(&self.available_encoders);
         let mut tasks = self
             .file_queue
             .queue_selected_pending_conversions()
             .iter()
-            .map(|file| conversion_task_from_file(file, &output_directory))
+            .map(|file| conversion_task_from_file_with_backend(file, &output_directory, hw_backend))
             .collect::<Vec<_>>();
         disambiguate_output_paths(&mut tasks);
 

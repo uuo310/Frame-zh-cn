@@ -8,7 +8,7 @@ use std::{
 };
 
 use frame_core::{
-    args::{build_ffmpeg_args, build_output_path, validate_task_input},
+    args::{build_ffmpeg_args_with_hwaccel, build_output_path, validate_task_input},
     error::ConversionError,
     events::ConversionEvent,
     probe::{ffprobe_json_args, parse_ffprobe_stdout},
@@ -124,7 +124,13 @@ fn run_prepared_conversion_task_with_control(
         &task.config.container,
         task.output_name.as_deref(),
     );
-    let args = build_ffmpeg_args(&task.file_path, &output_path, &task.config, &probe)?;
+    let args = build_ffmpeg_args_with_hwaccel(
+        &task.file_path,
+        &output_path,
+        &task.config,
+        &probe,
+        task.hw_decode_backend,
+    )?;
     let executable = ffmpeg_executable();
 
     emit(ConversionEvent::log(

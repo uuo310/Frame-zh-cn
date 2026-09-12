@@ -9,8 +9,25 @@ use frame_core::capabilities::{
     AvailableEncoders, AvailableFilters, ffmpeg_encoder_list_args, ffmpeg_filter_list_args,
     parse_available_encoders, parse_available_filters,
 };
+use frame_core::types::HwDecodeBackend;
 
 use crate::runtime_binaries::ffmpeg_executable;
+
+/// 把已探测到的编码能力折算成本机可用的显卡解码后端。
+///
+/// 显卡上负责解码的单元与负责编码的是分开的硬件（NVIDIA 侧为 NVENC / NVDEC），因此能列出
+/// 任一硬件编码器就说明对应后端可用；两者都列不出来时返回 [`HwDecodeBackend::None`]，
+/// 界面上应据此把「硬件解码」置灰。
+#[must_use]
+pub const fn hw_decode_backend(encoders: &AvailableEncoders) -> HwDecodeBackend {
+    if encoders.h264_nvenc || encoders.hevc_nvenc || encoders.av1_nvenc {
+        HwDecodeBackend::Cuda
+    } else if encoders.h264_videotoolbox || encoders.hevc_videotoolbox {
+        HwDecodeBackend::VideoToolbox
+    } else {
+        HwDecodeBackend::None
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum CapabilityDetectionError {

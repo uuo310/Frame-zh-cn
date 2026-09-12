@@ -649,6 +649,18 @@ pub struct FfprobeTags {
     pub service_provider: Option<String>,
 }
 
+/// 本机可用的显卡解码后端。由应用层按启动时探测到的编码能力填入（有 NVENC 即有 NVIDIA 的
+/// NVDEC，有 `VideoToolbox` 即有苹果硬解）。软件编码器路径需要它才能决定发哪个 `-hwaccel`；
+/// 选硬件编码器时后端由编码器本身决定，不看这个字段。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum HwDecodeBackend {
+    /// 探测不到可用硬解后端（例如纯 CPU 机器，或只提供软件编码器的 Linux 构建）。
+    #[default]
+    None,
+    Cuda,
+    VideoToolbox,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConversionTask {
     pub id: String,
@@ -656,6 +668,8 @@ pub struct ConversionTask {
     pub output_directory: String,
     pub output_name: Option<String>,
     pub config: ConversionConfig,
+    /// 运行时信息，不随配置持久化：本机能否用显卡解码输入视频。
+    pub hw_decode_backend: HwDecodeBackend,
 }
 
 #[cfg(test)]

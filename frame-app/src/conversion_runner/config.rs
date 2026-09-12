@@ -4,8 +4,8 @@ use frame_core::{
         AudioFiltersConfig as CoreAudioFiltersConfig, ConversionConfig as CoreConversionConfig,
         ConversionTask, CropConfig, DeinterlaceMode as CoreDeinterlaceMode,
         FilterStrength as CoreFilterStrength, FilterValue as CoreFilterValue,
-        MetadataConfig as CoreMetadataConfig, MetadataMode as CoreMetadataMode, OverlayConfig,
-        VideoColorFiltersConfig as CoreVideoColorFiltersConfig,
+        HwDecodeBackend, MetadataConfig as CoreMetadataConfig, MetadataMode as CoreMetadataMode,
+        OverlayConfig, VideoColorFiltersConfig as CoreVideoColorFiltersConfig,
         VideoFiltersConfig as CoreVideoFiltersConfig,
     },
 };
@@ -28,6 +28,16 @@ use crate::{
 
 #[must_use]
 pub fn conversion_task_from_file(file: &FileItem, output_directory: &str) -> ConversionTask {
+    conversion_task_from_file_with_backend(file, output_directory, HwDecodeBackend::default())
+}
+
+/// 同 [`conversion_task_from_file`]，但额外携带本机可用的显卡解码后端。
+#[must_use]
+pub fn conversion_task_from_file_with_backend(
+    file: &FileItem,
+    output_directory: &str,
+    hw_decode_backend: HwDecodeBackend,
+) -> ConversionTask {
     let output_name = crate::settings::sanitize_output_name(&file.output_name);
 
     ConversionTask {
@@ -36,6 +46,7 @@ pub fn conversion_task_from_file(file: &FileItem, output_directory: &str) -> Con
         output_directory: output_directory.to_string(),
         output_name: (!output_name.is_empty()).then_some(output_name),
         config: core_config_from_gpui(&file.config),
+        hw_decode_backend,
     }
 }
 

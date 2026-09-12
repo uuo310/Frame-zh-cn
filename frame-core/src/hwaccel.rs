@@ -16,7 +16,7 @@
 
 use crate::filters::{build_video_filters, has_overlay};
 use crate::media_rules::is_image_container;
-use crate::types::{ConversionConfig, ProbeMetadata};
+use crate::types::{ConversionConfig, HwDecodeBackend, ProbeMetadata};
 use crate::utils::get_hwaccel_args;
 
 /// 硬件解码相关的构建结果。
@@ -37,17 +37,30 @@ impl DecodePlan {
     }
 }
 
-/// 根据配置与探测结果决定硬件解码的输入段参数，以及是否允许帧留在显存。
+/// 根据配置、探测结果与本机显卡后端决定硬件解码的输入段参数，以及是否允许帧留在显存。
 #[must_use]
-pub fn plan(config: &ConversionConfig, probe: &ProbeMetadata) -> DecodePlan {
+pub fn plan(
+    config: &ConversionConfig,
+    probe: &ProbeMetadata,
+    backend: HwDecodeBackend,
+) -> DecodePlan {
     if !config.hw_decode {
         return DecodePlan::software_decode();
     }
 
-    let raw = get_hwaccel_args(&config.video_codec);
-    if raw.is_empty() {
-        return DecodePlan::software_decode();
-    }
+    let encoder_args = get_hwaccel_args(&config.video_codec);
+    let raw = if encoder_args.is_empty() {
+        // 软件编码器读不到显存帧，因此这条路径由本机后端决定，且永不要求帧留在显存。
+        match backend {
+            HwDecodeBackend::Cuda => vec!["-hwaccel".to_string(), "cuda".to_string()],
+            HwDecodeBackend::VideoToolbox => {
+                vec!["-hwaccel".to_string(), "videotoolbox".to_string()]
+            }
+            HwDecodeBackend::None => return DecodePlan::software_decode(),
+        }
+    } else {
+        encoder_args
+    };
 
     if vram_path_available(config, probe, &raw) {
         DecodePlan {

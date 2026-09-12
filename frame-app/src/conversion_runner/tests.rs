@@ -9,6 +9,7 @@ use crate::settings::{
     FilterValue, MetadataConfig, MetadataMode, ProcessingMode, VideoColorFiltersConfig,
     VideoFiltersConfig,
 };
+use frame_core::types::HwDecodeBackend;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -504,6 +505,7 @@ fn run_conversion_task_with_control_emits_cancelled_when_cancelled_before_valida
         output_directory: "/tmp/frame-output".to_string(),
         output_name: None,
         config: core_config_from_gpui(&GpuiConversionConfig::default()),
+        hw_decode_backend: HwDecodeBackend::default(),
     };
     let mut events = Vec::new();
 
@@ -549,6 +551,7 @@ fn run_conversion_task_should_emit_completed_for_real_ffmpeg_job() {
         output_directory: sandbox.root.to_string_lossy().into_owned(),
         output_name: Some(output_name.to_string()),
         config: core_config_from_gpui(&GpuiConversionConfig::default()),
+        hw_decode_backend: HwDecodeBackend::default(),
     };
     let mut events = Vec::new();
 
@@ -594,6 +597,7 @@ fn run_conversion_task_should_emit_completed_for_real_image_encoding_job() {
         output_directory: sandbox.root.to_string_lossy().into_owned(),
         output_name: Some(output_name.to_string()),
         config: core_config_from_gpui(&config),
+        hw_decode_backend: HwDecodeBackend::default(),
     };
     let mut events = Vec::new();
 

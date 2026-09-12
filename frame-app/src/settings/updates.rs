@@ -15,7 +15,7 @@ use super::{
     },
     options::{
         first_allowed_video_codec, first_allowed_video_pixel_format, first_allowed_video_preset,
-        is_hardware_video_codec, is_nvenc_video_codec, is_video_preset_allowed,
+        is_nvenc_video_codec, is_video_preset_allowed,
         is_videotoolbox_video_codec, mp2_original_channels_are_unsupported, normalized_hex_color,
     },
     rules::{
@@ -778,7 +778,7 @@ pub fn apply_videotoolbox_allow_sw(config: &mut ConversionConfig, enabled: bool)
 }
 
 pub fn apply_hw_decode(config: &mut ConversionConfig, enabled: bool) -> bool {
-    if !is_hardware_video_codec(&config.video_codec) || config.hw_decode == enabled {
+    if config.hw_decode == enabled {
         return false;
     }
 
@@ -1025,9 +1025,8 @@ pub fn normalize_video_config(
     if !is_videotoolbox_video_codec(&config.video_codec) {
         config.videotoolbox_allow_sw = false;
     }
-    if !is_hardware_video_codec(&config.video_codec) {
-        config.hw_decode = false;
-    }
+    // 硬件解码只管拆包，与编码器无关：切回软件编码器时不再清掉这个偏好，
+    // 由参数层按本机可用后端决定发不发 `-hwaccel`（GIF 等分支仍各自清）。
 
     normalize_image_encoding_settings(config);
 
