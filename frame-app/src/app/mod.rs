@@ -73,6 +73,10 @@ use crate::{
     app_persistence::{AppPersistence, AppSettings},
     appearance::{AppearanceSettings, ColorTheme, ScalePreset},
     assets::{self},
+    bitrate_analysis::{
+        BitrateAnalysisEntry, BitrateAnalysisStatus, BitrateAnalysisStore, SourceInfoView,
+        DEFAULT_BITRATE_WINDOW_S, run_bitrate_analysis,
+    },
     capabilities::{detect_available_encoders, detect_available_filters},
     conversion_events::{ActiveLogFile, ConversionEventState, LogLine, all_conversions_settled},
     conversion_runner::{
@@ -286,6 +290,7 @@ pub struct FrameRoot {
     default_output_directory: Option<std::path::PathBuf>,
     text_input_ui: FrameTextInputUiState,
     source_metadata: SourceMetadataStore,
+    bitrate_analysis: BitrateAnalysisStore,
     conversion_processes: ConversionProcessController,
     available_encoders: AvailableEncoders,
     available_filters: AvailableFilters,
@@ -314,6 +319,15 @@ struct SettingsUiState {
     is_open: bool,
     is_present: bool,
     active_tab: SettingsTab,
+    source_info_view: SourceInfoView,
+    bitrate_window_s: f64,
+    /// Index of the bitrate curve column currently hovered by the mouse. None
+    /// when the cursor is outside the curve. Resets on file / window switch.
+    bitrate_curve_hover: Option<usize>,
+    /// Popover state for the bitrate-window dropdown (replaces the old chip
+    /// row). Uses the shared PopoverState machine; Closing→Hidden is skipped
+    /// (no fade animation), so toggle and close both flip to Hidden directly.
+    bitrate_window_popover: PopoverState,
     max_concurrency_draft: String,
     max_concurrency_error: Option<String>,
     output_directory_error: Option<String>,
@@ -435,6 +449,10 @@ impl Default for SettingsUiState {
             is_open: false,
             is_present: false,
             active_tab: SettingsTab::Source,
+            source_info_view: SourceInfoView::default(),
+            bitrate_window_s: DEFAULT_BITRATE_WINDOW_S,
+            bitrate_curve_hover: None,
+            bitrate_window_popover: PopoverState::Hidden,
             max_concurrency_draft: DEFAULT_MAX_CONCURRENCY.to_string(),
             max_concurrency_error: None,
             output_directory_error: None,
@@ -838,6 +856,11 @@ struct SettingsRenderState<'a> {
     metadata: Option<&'a SourceMetadata>,
     metadata_status: MetadataStatus,
     metadata_error: Option<&'a str>,
+    source_info_view: SourceInfoView,
+    bitrate_window_s: f64,
+    bitrate_curve_hover: Option<usize>,
+    bitrate_window_popover: PopoverState,
+    bitrate_analysis: &'a BitrateAnalysisEntry,
     settings_disabled: bool,
     output_name: &'a str,
     output_name_focus: Option<&'a FocusHandle>,

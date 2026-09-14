@@ -136,6 +136,7 @@ pub fn source_metadata_from_probe(probe: ProbeMetadata) -> SourceMetadata {
         color_primaries: probe.color_primaries,
         profile: probe.profile,
         transport_stream: probe.transport_stream,
+        video_stream_index: probe.video_stream_index,
     }
 }
 

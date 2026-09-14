@@ -985,6 +985,9 @@ pub struct SourceMetadata {
     pub color_primaries: Option<String>,
     pub profile: Option<String>,
     pub transport_stream: Option<frame_core::types::TransportStreamMetadata>,
+    /// Global stream index of the video stream whose info this panel shows, so
+    /// bitrate analysis targets the same stream (multi-program TS ≠ always 0).
+    pub video_stream_index: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

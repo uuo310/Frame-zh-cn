@@ -51,6 +51,8 @@ pub const ICON_SPINNER: &str = "icons/spinner.svg";
 pub const ICON_SQUARE: &str = "icons/square.svg";
 pub const ICON_TRASH: &str = "icons/trash.svg";
 pub const ICON_PENCIL: &str = "icons/pencil.svg";
+pub const ICON_HELP_CIRCLE: &str = "icons/help-circle.svg";
+pub const ICON_SWAP_HORIZONTAL: &str = "icons/swap-horizontal.svg";
 
 const FRAME_ICON_SVG: &str = include_str!("../../assets/icons/frame.svg");
 const FRAME_FONT_REGULAR_BYTES: &[u8] =
@@ -95,6 +97,8 @@ const SPINNER_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 
 const SQUARE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M2.5 12C2.5 7.52166 2.5 5.28249 3.89124 3.89124C5.28249 2.5 7.52166 2.5 12 2.5C16.4783 2.5 18.7175 2.5 20.1088 3.89124C21.5 5.28249 21.5 7.52166 21.5 12C21.5 16.4783 21.5 18.7175 20.1088 20.1088C18.7175 21.5 16.4783 21.5 12 21.5C7.52166 21.5 5.28249 21.5 3.89124 20.1088C2.5 18.7175 2.5 16.4783 2.5 12Z" stroke="currentColor" stroke-width="1.5"/></svg>"#;
 const TRASH_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M19.5 5.5L18.8803 15.5251C18.7219 18.0864 18.6428 19.3671 18.0008 20.2879C17.6833 20.7431 17.2747 21.1273 16.8007 21.416C15.8421 22 14.559 22 11.9927 22C9.42312 22 8.1383 22 7.17905 21.4149C6.7048 21.1257 6.296 20.7408 5.97868 20.2848C5.33688 19.3626 5.25945 18.0801 5.10461 15.5152L4.5 5.5" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M3 5.5H21M16.0557 5.5L15.3731 4.09173C14.9196 3.15626 14.6928 2.68852 14.3017 2.39681C14.215 2.3321 14.1231 2.27454 14.027 2.2247C13.5939 2 13.0741 2 12.0345 2C10.9688 2 10.436 2 9.99568 2.23412C9.8981 2.28601 9.80498 2.3459 9.71729 2.41317C9.32164 2.7167 9.10063 3.20155 8.65861 4.17126L8.05292 5.5" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M9.5 16.5L9.5 10.5" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M14.5 16.5L14.5 10.5" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/></svg>"#;
 const PENCIL_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></svg>"#;
+const HELP_CIRCLE_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.5"/><path d="M9.09 9C9.32503 7.33151 10.7427 6.08472 12.4 6.08472C13.8138 6.08472 15.0339 6.98468 15.4836 8.26442C15.9333 9.54417 15.4468 10.9616 14.3001 11.72C13.5001 12.25 12.5001 12.7001 12.5001 14" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M12 17.5H12.01" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/></svg>"#;
+const SWAP_HORIZONTAL_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M8 3L4 7l4 4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="M4 7h16" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M16 21l4-4-4-4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="M20 17H4" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/></svg>"#;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FrameAssets;
@@ -142,6 +146,8 @@ impl AssetSource for FrameAssets {
             ICON_SQUARE => Cow::Borrowed(SQUARE_SVG.as_bytes()),
             ICON_TRASH => Cow::Borrowed(TRASH_SVG.as_bytes()),
             ICON_PENCIL => Cow::Borrowed(PENCIL_SVG.as_bytes()),
+            ICON_HELP_CIRCLE => Cow::Borrowed(HELP_CIRCLE_SVG.as_bytes()),
+            ICON_SWAP_HORIZONTAL => Cow::Borrowed(SWAP_HORIZONTAL_SVG.as_bytes()),
             _ => return Ok(None),
         };
 
@@ -173,6 +179,8 @@ impl AssetSource for FrameAssets {
                 SharedString::from("folder-import.svg"),
                 SharedString::from("frame.svg"),
                 SharedString::from("hard-drive.svg"),
+                SharedString::from("help-circle.svg"),
+                SharedString::from("swap-horizontal.svg"),
                 SharedString::from("layout-list.svg"),
                 SharedString::from("list-checks.svg"),
                 SharedString::from("minus.svg"),

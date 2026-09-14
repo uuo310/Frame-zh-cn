@@ -33,6 +33,7 @@ impl Render for FrameRoot {
 
         let state = self.app_state();
         let source_metadata_entry = self.selected_source_metadata_entry();
+        let bitrate_analysis_entry = self.selected_bitrate_analysis_entry();
         let source_metadata = source_metadata_entry.metadata.clone();
         self.normalize_selected_config(source_metadata.as_ref());
         self.resolve_selected_settings_tab(source_metadata.as_ref());
@@ -540,6 +541,11 @@ impl Render for FrameRoot {
                     metadata: source_metadata.as_ref(),
                     metadata_status: source_metadata_entry.status,
                     metadata_error: source_metadata_entry.error.as_deref(),
+                    source_info_view: self.settings_ui.source_info_view,
+                    bitrate_window_s: self.settings_ui.bitrate_window_s,
+                    bitrate_curve_hover: self.settings_ui.bitrate_curve_hover,
+                    bitrate_window_popover: self.settings_ui.bitrate_window_popover,
+                    bitrate_analysis: &bitrate_analysis_entry,
                     settings_disabled: self.file_queue.selected_file_locked(),
                     output_name: &selected_output_name,
                     output_name_focus: Some(&output_name_focus),
@@ -779,6 +785,10 @@ impl Render for FrameRoot {
                     }
                     if root.video_select_any_open() {
                         root.close_video_selects();
+                        cx.notify();
+                    }
+                    if root.settings_ui.bitrate_window_popover.is_open() {
+                        root.close_bitrate_window_popover();
                         cx.notify();
                     }
                 }),

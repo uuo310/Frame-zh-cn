@@ -1,6 +1,7 @@
 //! Shared backend services for the Frame GPUI migration.
 
 pub mod args;
+pub mod bitrate_analysis;
 pub mod capabilities;
 pub mod codec;
 pub mod container;

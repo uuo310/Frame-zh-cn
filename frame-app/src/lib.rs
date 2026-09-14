@@ -5,6 +5,7 @@ pub mod app_info;
 pub mod app_persistence;
 pub mod appearance;
 pub mod assets;
+pub mod bitrate_analysis;
 pub mod capabilities;
 pub mod conversion_events;
 pub mod conversion_runner;

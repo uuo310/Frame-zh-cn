@@ -109,6 +109,7 @@ impl FrameRoot {
             default_output_directory: persisted_settings.default_output_directory,
             text_input_ui: FrameTextInputUiState::default(),
             source_metadata: SourceMetadataStore::default(),
+            bitrate_analysis: BitrateAnalysisStore::default(),
             conversion_processes,
             available_encoders: AvailableEncoders::default(),
             available_filters: AvailableFilters::default(),
