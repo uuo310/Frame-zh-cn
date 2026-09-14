@@ -108,6 +108,10 @@ pub(in crate::app) fn frame_checkbox_row(
 
 /// Same as [`frame_checkbox_row`] but the hint sits after the label on one
 /// line, one size smaller, instead of stacked below it.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The checkbox row keeps label, hint, state, palette, context, and action explicit at call sites."
+)]
 pub(in crate::app) fn frame_checkbox_row_inline_hint(
     id: impl Into<String>,
     label: impl Into<String>,

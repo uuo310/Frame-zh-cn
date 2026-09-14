@@ -11,6 +11,10 @@ const TOOLTIP_HYSTERESIS_WINDOW: Duration = Duration::from_millis(300);
 const TOOLTIP_ENTER_DISTANCE: f32 = 4.0;
 const TOOLTIP_DEFERRED_PRIORITY: usize = 20;
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The tooltip builder keeps id, label, visibility, placement, child, palette, window, and context explicit at call sites."
+)]
 pub(in crate::app) fn frame_tooltip(
     id: impl Into<String>,
     label: impl Into<String>,

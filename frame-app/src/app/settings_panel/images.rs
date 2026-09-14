@@ -38,6 +38,10 @@ impl Render for SettingsImageRangeDragPreview {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The images tab builder keeps each settings input as its own explicit argument."
+)]
 pub(in crate::app) fn settings_images_tab(
     config: &ConversionConfig,
     settings_disabled: bool,

@@ -28,6 +28,10 @@ impl Render for SettingsVideoRangeDragPreview {
     clippy::too_many_lines,
     reason = "The declarative video tab keeps its conditional sections in the same order as the UI."
 )]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The video tab builder keeps each settings input as its own explicit argument."
+)]
 pub(in crate::app) fn settings_video_tab(
     config: &ConversionConfig,
     settings_disabled: bool,
@@ -361,6 +365,10 @@ fn format_frame_rate(rate: f64) -> String {
     }
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The dimension row builder keeps label, value, focus, and styling slots explicit at call sites."
+)]
 pub(in crate::app) fn settings_dimension_row(
     label: &'static str,
     id: &'static str,

@@ -75,13 +75,11 @@ impl FrameRoot {
         let snapshot = file.custom_snapshot.clone();
 
         let view = resolve_preset_view_state(&config, snapshot.as_ref(), &presets);
-        let compatible = preset_options(&config, &presets, metadata.as_ref())
-            .into_iter()
-            .filter(|option| option.is_compatible)
-            .collect::<Vec<_>>();
-        let (mut customs, builtins): (Vec<PresetOption>, Vec<PresetOption>) = compatible
-            .into_iter()
-            .partition(|option| !option.preset.built_in);
+        let (mut customs, builtins): (Vec<PresetOption>, Vec<PresetOption>) =
+            preset_options(&config, &presets, metadata.as_ref())
+                .into_iter()
+                .filter(|option| option.is_compatible)
+                .partition(|option| !option.preset.built_in);
         customs.reverse();
         let options = customs.into_iter().chain(builtins).collect::<Vec<_>>();
 

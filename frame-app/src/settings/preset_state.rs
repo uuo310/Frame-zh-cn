@@ -123,8 +123,10 @@ mod tests {
 
     #[test]
     fn unbound_when_no_snapshot_and_no_match() {
-        let mut config = ConversionConfig::default();
-        config.container = "mkv".to_string();
+        let config = ConversionConfig {
+            container: "mkv".to_string(),
+            ..ConversionConfig::default()
+        };
         let state = resolve_preset_view_state(&config, None, &presets());
         assert_eq!(state, PresetViewState::Unbound);
         assert!(!state.has_custom());
@@ -148,8 +150,10 @@ mod tests {
 
     #[test]
     fn custom_active_when_config_equals_snapshot() {
-        let mut config = ConversionConfig::default();
-        config.container = "mkv".to_string();
+        let config = ConversionConfig {
+            container: "mkv".to_string(),
+            ..ConversionConfig::default()
+        };
         let snapshot = config.clone();
         let state = resolve_preset_view_state(&config, Some(&snapshot), &presets());
         assert_eq!(state, PresetViewState::CustomActive);
@@ -163,8 +167,10 @@ mod tests {
     /// lose the custom state — it becomes `CustomSuspended` retaining the snapshot.
     #[test]
     fn viewing_a_preset_suspends_but_retains_custom() {
-        let mut custom = ConversionConfig::default();
-        custom.container = "mkv".to_string();
+        let custom = ConversionConfig {
+            container: "mkv".to_string(),
+            ..ConversionConfig::default()
+        };
         // User now views/applies preset p1: config becomes the preset config, snapshot kept.
         let viewing = ConversionConfig::default();
         let state = resolve_preset_view_state(&viewing, Some(&custom), &presets());
@@ -182,10 +188,14 @@ mod tests {
 
     #[test]
     fn suspended_without_viewing_when_config_matches_nothing() {
-        let mut custom = ConversionConfig::default();
-        custom.container = "mkv".to_string();
-        let mut orphan = ConversionConfig::default();
-        orphan.container = "avi".to_string();
+        let custom = ConversionConfig {
+            container: "mkv".to_string(),
+            ..ConversionConfig::default()
+        };
+        let orphan = ConversionConfig {
+            container: "avi".to_string(),
+            ..ConversionConfig::default()
+        };
         let state = resolve_preset_view_state(&orphan, Some(&custom), &presets());
         assert_eq!(
             state,

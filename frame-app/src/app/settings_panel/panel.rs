@@ -32,12 +32,12 @@ pub(in crate::app) fn settings_panel(
     let middle: Vec<SettingsTab> = visible_tabs
         .iter()
         .copied()
-        .filter(|tab| rail_cluster_middle(tab))
+        .filter(rail_cluster_middle)
         .collect();
     let right: Vec<SettingsTab> = visible_tabs
         .iter()
         .copied()
-        .filter(|tab| rail_cluster_right(tab))
+        .filter(rail_cluster_right)
         .collect();
     let tab_rail = div()
         .id("settings-tab-list")

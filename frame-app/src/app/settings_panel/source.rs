@@ -800,7 +800,7 @@ fn settings_bitrate_curve(
         .max()
         .unwrap_or(2) as f32)
         .mul_add(6.0, 6.0)
-        .clamp(16.0, f32::from(BITRATE_AXIS_LABEL_WIDTH_PX));
+        .clamp(16.0, BITRATE_AXIS_LABEL_WIDTH_PX);
     let mut y_axis = div()
         .relative()
         .flex_none()
