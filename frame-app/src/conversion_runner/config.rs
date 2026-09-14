@@ -113,6 +113,8 @@ pub fn core_config_from_gpui(config: &GpuiConversionConfig) -> CoreConversionCon
         nvenc_rc_lookahead: config.nvenc_rc_lookahead,
         nvenc_multipass: non_empty_or(&config.nvenc_multipass, "disabled"),
         video_two_pass: config.video_two_pass,
+        x265_multipass_opt_analysis: config.x265_multipass_opt_analysis,
+        x265_multipass_opt_distortion: config.x265_multipass_opt_distortion,
         videotoolbox_allow_sw: config.videotoolbox_allow_sw,
         hw_decode: config.hw_decode,
         pixel_format: non_empty_or(&config.pixel_format, DEFAULT_PIXEL_FORMAT),

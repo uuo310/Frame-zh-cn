@@ -634,6 +634,55 @@ fn settings_video_quality_section(
                             }
                         },
                     ))
+                    .when(
+                        config.video_codec == "libx265" && config.video_two_pass,
+                        |this| {
+                            this.child(settings_video_checkbox_row(
+                                "video-x265-analysis-refinement",
+                                "分析精炼",
+                                "x265 两遍附加：首遍多存分析信息，次遍决策更准，更耗时",
+                                config.x265_multipass_opt_analysis,
+                                settings_disabled,
+                                palette,
+                                cx,
+                                move |root, _event, _window, cx| {
+                                    if settings_disabled {
+                                        return;
+                                    }
+                                    if root.update_selected_config(|config| {
+                                        apply_x265_multipass_opt_analysis(
+                                            config,
+                                            !config.x265_multipass_opt_analysis,
+                                        )
+                                    }) {
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                            .child(settings_video_checkbox_row(
+                                "video-x265-distortion-refinement",
+                                "畸变精炼",
+                                "x265 两遍附加：首遍多存失真信息，次遍码率分配更准，更耗时",
+                                config.x265_multipass_opt_distortion,
+                                settings_disabled,
+                                palette,
+                                cx,
+                                move |root, _event, _window, cx| {
+                                    if settings_disabled {
+                                        return;
+                                    }
+                                    if root.update_selected_config(|config| {
+                                        apply_x265_multipass_opt_distortion(
+                                            config,
+                                            !config.x265_multipass_opt_distortion,
+                                        )
+                                    }) {
+                                        cx.notify();
+                                    }
+                                },
+                            ))
+                        },
+                    )
                 },
             );
         if vbv_enabled {

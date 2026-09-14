@@ -679,6 +679,8 @@ pub struct ConversionConfig {
     pub nvenc_rc_lookahead: u32,
     pub nvenc_multipass: String,
     pub video_two_pass: bool,
+    pub x265_multipass_opt_analysis: bool,
+    pub x265_multipass_opt_distortion: bool,
     pub videotoolbox_allow_sw: bool,
     pub hw_decode: bool,
 }
@@ -745,6 +747,8 @@ impl Default for ConversionConfig {
             nvenc_rc_lookahead: 0,
             video_two_pass: false,
             nvenc_multipass: "disabled".to_string(),
+            x265_multipass_opt_analysis: false,
+            x265_multipass_opt_distortion: false,
             videotoolbox_allow_sw: false,
             hw_decode: false,
         }

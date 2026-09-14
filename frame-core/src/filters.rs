@@ -423,6 +423,8 @@ mod tests {
             nvenc_rc_lookahead: 0,
             video_two_pass: false,
             nvenc_multipass: "disabled".to_string(),
+            x265_multipass_opt_analysis: false,
+            x265_multipass_opt_distortion: false,
             videotoolbox_allow_sw: false,
             hw_decode: false,
             pixel_format: "auto".to_string(),

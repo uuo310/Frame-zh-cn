@@ -2239,3 +2239,89 @@ mod visible_settings_tabs {
         assert_eq!(active, SettingsTab::Output);
     }
 }
+
+mod x265_multipass_opt {
+    use super::*;
+
+    fn two_pass_x265() -> ConversionConfig {
+        ConversionConfig {
+            video_codec: "libx265".to_string(),
+            video_bitrate_mode: "bitrate".to_string(),
+            video_two_pass: true,
+            ..ConversionConfig::default()
+        }
+    }
+
+    #[test]
+    fn refinement_flags_enable_only_inside_their_gates() {
+        let mut config = two_pass_x265();
+
+        assert!(apply_x265_multipass_opt_analysis(&mut config, true));
+        assert!(apply_x265_multipass_opt_distortion(&mut config, true));
+        assert!(config.x265_multipass_opt_analysis);
+        assert!(config.x265_multipass_opt_distortion);
+
+        // 非 x265：拒绝
+        let mut x264 = config.clone();
+        x264.video_codec = "libx264".to_string();
+        assert!(!apply_x265_multipass_opt_analysis(&mut x264, true));
+
+        // 未开两遍：拒绝
+        let mut without_two_pass = two_pass_x265();
+        without_two_pass.video_two_pass = false;
+        assert!(!apply_x265_multipass_opt_distortion(
+            &mut without_two_pass,
+            true
+        ));
+
+        // 恒定质量档：拒绝
+        let mut crf = two_pass_x265();
+        crf.video_bitrate_mode = "crf".to_string();
+        assert!(!apply_x265_multipass_opt_analysis(&mut crf, true));
+
+        // 幂等：重复开同一项返回 false
+        let mut enabled = two_pass_x265();
+        enabled.x265_multipass_opt_analysis = true;
+        assert!(!apply_x265_multipass_opt_analysis(&mut enabled, true));
+    }
+
+    #[test]
+    fn disabling_two_pass_resets_the_refinement_flags() {
+        let mut config = two_pass_x265();
+        config.x265_multipass_opt_analysis = true;
+        config.x265_multipass_opt_distortion = true;
+
+        assert!(apply_video_two_pass(&mut config, false));
+        assert!(!config.video_two_pass);
+        assert!(!config.x265_multipass_opt_analysis);
+        assert!(!config.x265_multipass_opt_distortion);
+    }
+
+    #[test]
+    fn switching_bitrate_mode_or_codec_resets_the_refinement_flags() {
+        let mut config = two_pass_x265();
+        config.x265_multipass_opt_analysis = true;
+        config.x265_multipass_opt_distortion = true;
+
+        // 切恒定质量档：两遍与精炼一并复位
+        assert!(apply_video_bitrate_mode(&mut config, "crf"));
+        assert!(!config.video_two_pass);
+        assert!(!config.x265_multipass_opt_analysis);
+        assert!(!config.x265_multipass_opt_distortion);
+
+        // 编码器离开 x265：精炼复位（两遍保留给仍支持的软编）
+        let mut moved = two_pass_x265();
+        moved.x265_multipass_opt_analysis = true;
+        assert!(apply_video_codec(&mut moved, "libx264"));
+        assert_eq!(moved.video_codec, "libx264");
+        assert!(moved.video_two_pass, "libx264 仍支持两遍，开关应保留");
+        assert!(!moved.x265_multipass_opt_analysis);
+
+        // 编码器换成不支持 -pass 的：两遍与精炼一并复位
+        let mut vp9 = two_pass_x265();
+        vp9.x265_multipass_opt_distortion = true;
+        assert!(apply_video_codec(&mut vp9, "vp9"));
+        assert!(!vp9.video_two_pass);
+        assert!(!vp9.x265_multipass_opt_distortion);
+    }
+}

@@ -375,6 +375,14 @@ pub struct ConversionConfig {
     /// 两遍编码（FFmpeg `-pass 1/2`），仅软件编码器与目标码率档生效。默认关闭＝单遍。
     #[serde(default)]
     pub video_two_pass: bool,
+    /// x265 两遍分析精炼（`--multi-pass-opt-analysis`）：首遍多存分析信息，次遍用于决策。
+    /// 仅 libx265 + 两遍编码 + 目标码率档生效。默认关闭。
+    #[serde(default)]
+    pub x265_multipass_opt_analysis: bool,
+    /// x265 两遍畸变精炼（`--multi-pass-opt-distortion`）：首遍多存失真信息，次遍用于码率分配。
+    /// 仅 libx265 + 两遍编码 + 目标码率档生效。默认关闭。
+    #[serde(default)]
+    pub x265_multipass_opt_distortion: bool,
     /// NVENC 预看帧数（`-rc-lookahead`）。0 表示不发该参数，即跟随默认关闭。
     #[serde(default)]
     pub nvenc_rc_lookahead: u32,
@@ -742,6 +750,9 @@ mod tests {
         assert!(config.external_subtitle_tracks.is_empty());
         assert_eq!(config.metadata.service_name, None);
         assert_eq!(config.metadata.service_provider, None);
+        assert!(!config.video_two_pass);
+        assert!(!config.x265_multipass_opt_analysis);
+        assert!(!config.x265_multipass_opt_distortion);
     }
 
     #[test]

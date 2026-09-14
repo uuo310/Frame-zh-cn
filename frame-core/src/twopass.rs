@@ -101,6 +101,29 @@ pub fn cleanup_stats(directory: &Path, prefix: &str) {
     }
 }
 
+/// libx265 两遍精炼的 `-x265-params` 值：`multi-pass-opt-analysis`／`multi-pass-opt-distortion`。
+///
+/// 两项都关返回 [`None`]（不发 `-x265-params`）；只开其一发单键，两项都开合并为一键串。
+/// 「该不该发」（libx265 + 两遍已激活）由调用方门控；键值均为固定字面量，无注入面。
+#[must_use]
+pub fn x265_refinement_params(
+    video_codec: &str,
+    opt_analysis: bool,
+    opt_distortion: bool,
+) -> Option<String> {
+    if video_codec != "libx265" {
+        return None;
+    }
+    let mut keys: Vec<&str> = Vec::new();
+    if opt_analysis {
+        keys.push("multi-pass-opt-analysis=1");
+    }
+    if opt_distortion {
+        keys.push("multi-pass-opt-distortion=1");
+    }
+    (!keys.is_empty()).then(|| keys.join(":"))
+}
+
 #[cfg(test)]
 mod tests {
     use std::env;
@@ -116,6 +139,30 @@ mod tests {
         assert!(!is_supported("h264_nvenc"), "硬编走 -multipass，不走 -pass");
         assert!(!is_supported("h264_videotoolbox"));
         assert!(!is_supported("mpeg2video"));
+    }
+
+    #[test]
+    fn x265_refinement_params_only_applies_to_libx265() {
+        assert!(x265_refinement_params("libx264", true, true).is_none());
+        assert!(x265_refinement_params("libsvtav1", true, true).is_none());
+        assert!(x265_refinement_params("h264_nvenc", true, true).is_none());
+    }
+
+    #[test]
+    fn x265_refinement_params_silent_until_a_flag_is_set() {
+        assert!(x265_refinement_params("libx265", false, false).is_none());
+        assert_eq!(
+            x265_refinement_params("libx265", true, false).as_deref(),
+            Some("multi-pass-opt-analysis=1")
+        );
+        assert_eq!(
+            x265_refinement_params("libx265", false, true).as_deref(),
+            Some("multi-pass-opt-distortion=1")
+        );
+        assert_eq!(
+            x265_refinement_params("libx265", true, true).as_deref(),
+            Some("multi-pass-opt-analysis=1:multi-pass-opt-distortion=1")
+        );
     }
 
     #[test]

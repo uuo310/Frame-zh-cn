@@ -572,11 +572,14 @@ pub fn apply_video_bitrate_mode(config: &mut ConversionConfig, mode: &str) -> bo
     if config.video_bitrate_mode == "crf" {
         config.nvenc_multipass = "disabled".to_string();
         config.video_two_pass = false;
+        config.x265_multipass_opt_analysis = false;
+        config.x265_multipass_opt_distortion = false;
     }
     true
 }
 
 /// 两遍编码开关。仅支持 `-pass` 的软件编码器、且处于目标码率档时可开。
+/// 关闭时一并复位 x265 精炼子开关，避免留下看不见却仍会持久化的状态。
 pub fn apply_video_two_pass(config: &mut ConversionConfig, enabled: bool) -> bool {
     if !frame_core::twopass::is_supported(&config.video_codec)
         || config.video_bitrate_mode != "bitrate"
@@ -586,6 +589,38 @@ pub fn apply_video_two_pass(config: &mut ConversionConfig, enabled: bool) -> boo
     }
 
     config.video_two_pass = enabled;
+    if !enabled {
+        config.x265_multipass_opt_analysis = false;
+        config.x265_multipass_opt_distortion = false;
+    }
+    true
+}
+
+/// x265 两遍分析精炼。仅 libx265 + 已开两遍 + 目标码率档时可开。
+pub fn apply_x265_multipass_opt_analysis(config: &mut ConversionConfig, enabled: bool) -> bool {
+    if config.video_codec != "libx265"
+        || !config.video_two_pass
+        || config.video_bitrate_mode != "bitrate"
+        || config.x265_multipass_opt_analysis == enabled
+    {
+        return false;
+    }
+
+    config.x265_multipass_opt_analysis = enabled;
+    true
+}
+
+/// x265 两遍畸变精炼。仅 libx265 + 已开两遍 + 目标码率档时可开。
+pub fn apply_x265_multipass_opt_distortion(config: &mut ConversionConfig, enabled: bool) -> bool {
+    if config.video_codec != "libx265"
+        || !config.video_two_pass
+        || config.video_bitrate_mode != "bitrate"
+        || config.x265_multipass_opt_distortion == enabled
+    {
+        return false;
+    }
+
+    config.x265_multipass_opt_distortion = enabled;
     true
 }
 
@@ -1065,6 +1100,16 @@ pub fn normalize_video_config(
         config.nvenc_temporal_aq = false;
         config.nvenc_rc_lookahead = 0;
         config.nvenc_multipass = "disabled".to_string();
+    }
+    if !frame_core::twopass::is_supported(&config.video_codec) {
+        // 两遍与精炼只在软编目标码率档有意义：编码器换成不支持 `-pass` 的就一并清，
+        // 与恒定质量档的复位口径一致，不留看不见的状态。
+        config.video_two_pass = false;
+        config.x265_multipass_opt_analysis = false;
+        config.x265_multipass_opt_distortion = false;
+    } else if config.video_codec != "libx265" {
+        config.x265_multipass_opt_analysis = false;
+        config.x265_multipass_opt_distortion = false;
     }
     if !is_videotoolbox_video_codec(&config.video_codec) {
         config.videotoolbox_allow_sw = false;

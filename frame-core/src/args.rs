@@ -741,6 +741,15 @@ pub fn build_ffmpeg_args_with_hwaccel(
     if twopass::is_active(config) {
         args.push("-pass".to_string());
         args.push("2".to_string());
+        // x265 两遍精炼是两遍自身的附加开关，随两遍一起生效；x264/SVT 无对应参数。
+        if let Some(params) = twopass::x265_refinement_params(
+            &config.video_codec,
+            config.x265_multipass_opt_analysis,
+            config.x265_multipass_opt_distortion,
+        ) {
+            args.push("-x265-params".to_string());
+            args.push(params);
+        }
     }
 
     args.push("-dn".to_string());
@@ -1558,6 +1567,8 @@ mod tests {
             nvenc_rc_lookahead: 0,
             video_two_pass: false,
             nvenc_multipass: "disabled".to_string(),
+            x265_multipass_opt_analysis: false,
+            x265_multipass_opt_distortion: false,
             videotoolbox_allow_sw: false,
             hw_decode: false,
             pixel_format: "auto".to_string(),
@@ -1909,6 +1920,57 @@ mod tests {
         assert!(
             !args.iter().any(|arg| arg == "-pass"),
             "未勾选时不应声明两遍：{args:?}"
+        );
+    }
+
+    #[test]
+    fn x265_two_pass_refinement_travels_with_the_pass_declaration() {
+        let mut refined = sample_config("mp4", "libx265");
+        refined.video_bitrate_mode = "bitrate".to_string();
+        refined.video_two_pass = true;
+        refined.x265_multipass_opt_analysis = true;
+        refined.x265_multipass_opt_distortion = true;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &refined, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(
+                &args,
+                "-x265-params",
+                "multi-pass-opt-analysis=1:multi-pass-opt-distortion=1",
+            ),
+            "两项精炼都开应合并为一条 -x265-params：{args:?}"
+        );
+
+        let mut analysis_only = refined.clone();
+        analysis_only.x265_multipass_opt_distortion = false;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &analysis_only, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-x265-params", "multi-pass-opt-analysis=1"),
+            "只开分析精炼应只发该键：{args:?}"
+        );
+
+        let mut x264 = refined.clone();
+        x264.video_codec = "libx264".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &x264, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-x265-params"),
+            "x264 不应收到 x265 参数：{args:?}"
+        );
+
+        let mut quality = refined.clone();
+        quality.video_bitrate_mode = "crf".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &quality, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-x265-params"),
+            "恒定质量档两遍不激活，精炼随两遍一起静默：{args:?}"
+        );
+
+        let mut unrefined = refined;
+        unrefined.x265_multipass_opt_analysis = false;
+        unrefined.x265_multipass_opt_distortion = false;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &unrefined, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-x265-params"),
+            "两项都关不应发 -x265-params：{args:?}"
         );
     }
 
