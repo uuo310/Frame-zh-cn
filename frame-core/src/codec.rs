@@ -90,15 +90,18 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
             args.push("-rc-lookahead".to_string());
             args.push(config.nvenc_rc_lookahead.to_string());
         }
-        // 多遍分析：qres／fullres 的含义就是「两遍模式里分析遍用什么分辨率」，
-        // 只发 -multipass 而不切到两遍率控，NVENC 仍按单遍处理（实测输出无差异），
-        // 因此两个参数一起发。只接受这两个合法值，其余一律忽略；且只在目标码率档发
-        // ——恒定质量没有码率目标可分配。
+        // 多遍分析：qres＝分析遍用 1/4 分辨率，fullres＝全分辨率；只发 -multipass
+        // 这一个参数即可生效（实测三档输出互异）。不要再附带 -2pass：实测它会无视
+        // -multipass 的取值、强制按全分辨率处理（用户选 qres 实得 fullres），且该选项
+        // 在 ffmpeg 9.x 已被移除，保留会阻断升级。
+        // 收益口径：实测多遍的画质/体积收益量级小、且与 -rc-lookahead 及素材内容相关，
+        // UI 文案不得承诺画质提升。
+        // 只接受这两个合法值，其余一律忽略；且只在目标码率档发——恒定质量没有码率
+        // 目标可分配。preset 侧对 -multipass 的隐含覆盖（slow/medium/fast 别名携带
+        // 单遍/两遍标志）已在 map_nvenc_preset 统一映射到 p1-p7 直选名后消除。
         if config.video_bitrate_mode == "bitrate"
             && matches!(config.nvenc_multipass.as_str(), "qres" | "fullres")
         {
-            args.push("-2pass".to_string());
-            args.push("1".to_string());
             args.push("-multipass".to_string());
             args.push(config.nvenc_multipass.clone());
         }

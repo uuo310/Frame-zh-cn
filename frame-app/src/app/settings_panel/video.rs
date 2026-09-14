@@ -939,7 +939,7 @@ fn settings_video_nvenc_section(
                         config, disabled, palette, window, cx,
                     ))
                     .child(settings_hint_text(
-                        "先分析整片再分配码率，只在目标码率档生效，会增加耗时。",
+                        "先做一遍预分析再正式编码，把码率用在画面更需要的地方；收益很小、因内容而异，且会增加耗时。",
                         palette,
                     )),
             )

@@ -1802,7 +1802,7 @@ mod tests {
     }
 
     #[test]
-    fn nvenc_multipass_switches_to_two_pass_rate_control() {
+    fn nvenc_multipass_sends_only_the_multipass_option() {
         let mut config = sample_config("mp4", "h264_nvenc");
         config.video_bitrate_mode = "bitrate".to_string();
         config.nvenc_multipass = "qres".to_string();
@@ -1810,13 +1810,28 @@ mod tests {
         crate::codec::add_video_codec_args(&mut args, &config);
 
         assert!(
-            args_contains_pair(&args, "-2pass", "1"),
-            "多遍分析需要切到两遍率控：{args:?}"
-        );
-        assert!(
             args_contains_pair(&args, "-multipass", "qres"),
             "应发出所选的分析遍分辨率：{args:?}"
         );
+        assert!(
+            !args.iter().any(|arg| arg == "-2pass"),
+            "不得再发 -2pass：它会无视 -multipass 取值强制按全分辨率处理：{args:?}"
+        );
+    }
+
+    #[test]
+    fn nvenc_preset_aliases_are_remapped_to_flagless_p_names() {
+        let cases = [("medium", "p4"), ("fast", "p1"), ("slow", "p7")];
+        for (alias, direct) in cases {
+            let mut config = sample_config("mp4", "h264_nvenc");
+            config.preset = alias.to_string();
+            let mut args = Vec::new();
+            crate::codec::add_video_codec_args(&mut args, &config);
+            assert!(
+                args_contains_pair(&args, "-preset", direct),
+                "{alias} 应映射为 {direct} 直选名（别名隐含的单遍/两遍标志会覆盖 -multipass）：{args:?}"
+            );
+        }
     }
 
     #[test]

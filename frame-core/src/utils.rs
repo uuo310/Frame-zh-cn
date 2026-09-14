@@ -63,16 +63,19 @@ pub fn is_videotoolbox_codec(codec: &str) -> bool {
     matches!(codec, "h264_videotoolbox" | "hevc_videotoolbox")
 }
 
+/// NVENC preset 统一映射到 p1-p7 直选名。ffmpeg 的 slow/medium/fast 别名虽指向相同的
+/// preset GUID（P7/P4/P1），但各携带隐含的单遍/两遍标志，会覆盖 -multipass 的取值
+/// （实测：medium/fast 下 -multipass 静默失效、slow 下被强制 fullres）。映射到直选名后
+/// preset 语义不变（同 GUID），-multipass 不再被覆盖。
 #[must_use]
 pub fn map_nvenc_preset(preset: &str) -> String {
     match preset {
         "default" => "default".to_string(),
-        "fast" | "medium" | "slow" | "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7" => {
-            preset.to_string()
-        }
-        "ultrafast" | "superfast" | "veryfast" | "faster" => "fast".to_string(),
-        "slower" | "veryslow" => "slow".to_string(),
-        _ => "medium".to_string(),
+        "p1" | "p2" | "p3" | "p4" | "p5" | "p6" | "p7" => preset.to_string(),
+        "fast" | "ultrafast" | "superfast" | "veryfast" | "faster" => "p1".to_string(),
+        "medium" => "p4".to_string(),
+        "slow" | "slower" | "veryslow" => "p7".to_string(),
+        _ => "p4".to_string(),
     }
 }
 
