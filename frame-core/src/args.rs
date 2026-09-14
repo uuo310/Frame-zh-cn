@@ -19,6 +19,7 @@ use crate::media_rules::{
     is_audio_stream_codec_allowed, is_image_container, is_video_codec_allowed,
     is_video_only_container, is_video_pixel_format_allowed, is_video_stream_codec_allowed,
 };
+use crate::twopass;
 use crate::types::{
     AudioTrack, ConversionConfig, ExternalSubtitleTrack, HwDecodeBackend, MetadataConfig,
     MetadataMode, ProbeMetadata, SubtitleTrack, VOLUME_EPSILON,
@@ -733,6 +734,13 @@ pub fn build_ffmpeg_args_with_hwaccel(
             args.push("-af".to_string());
             args.push(audio_filters.join(","));
         }
+    }
+
+    // 两遍编码：这里只声明「第二遍＝正式编码」，统计文件路径是运行时信息，
+    // 由运行器注入 -passlogfile（见 frame_core::twopass）。
+    if twopass::is_active(config) {
+        args.push("-pass".to_string());
+        args.push("2".to_string());
     }
 
     args.push("-dn".to_string());
@@ -1547,6 +1555,9 @@ mod tests {
             overlay: None,
             nvenc_spatial_aq: false,
             nvenc_temporal_aq: false,
+            nvenc_rc_lookahead: 0,
+            video_two_pass: false,
+            nvenc_multipass: "disabled".to_string(),
             videotoolbox_allow_sw: false,
             hw_decode: false,
             pixel_format: "auto".to_string(),
@@ -1756,6 +1767,134 @@ mod tests {
         assert!(args_contains_pair(&args, "-rc:v", "vbr"));
         assert!(args_contains_pair(&args, "-b:v", "5000k"));
         assert!(args_contains_pair(&args, "-maxrate", "8000k"));
+    }
+
+    #[test]
+    fn nvenc_rc_lookahead_is_emitted_when_selected() {
+        let mut config = sample_config("mp4", "h264_nvenc");
+        config.nvenc_rc_lookahead = 20;
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &config);
+
+        assert!(
+            args_contains_pair(&args, "-rc-lookahead", "20"),
+            "选了预看应发出 -rc-lookahead：{args:?}"
+        );
+    }
+
+    #[test]
+    fn nvenc_rc_lookahead_stays_out_of_default_and_software_paths() {
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &sample_config("mp4", "h264_nvenc"));
+        assert!(
+            !args.iter().any(|arg| arg == "-rc-lookahead"),
+            "默认（0 帧）不应发出该参数：{args:?}"
+        );
+
+        let mut software = sample_config("mp4", "libx264");
+        software.nvenc_rc_lookahead = 40;
+        let mut software_args = Vec::new();
+        crate::codec::add_video_codec_args(&mut software_args, &software);
+        assert!(
+            !software_args.iter().any(|arg| arg == "-rc-lookahead"),
+            "软件编码器不应收到 NVENC 专属参数：{software_args:?}"
+        );
+    }
+
+    #[test]
+    fn nvenc_multipass_switches_to_two_pass_rate_control() {
+        let mut config = sample_config("mp4", "h264_nvenc");
+        config.video_bitrate_mode = "bitrate".to_string();
+        config.nvenc_multipass = "qres".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &config);
+
+        assert!(
+            args_contains_pair(&args, "-2pass", "1"),
+            "多遍分析需要切到两遍率控：{args:?}"
+        );
+        assert!(
+            args_contains_pair(&args, "-multipass", "qres"),
+            "应发出所选的分析遍分辨率：{args:?}"
+        );
+    }
+
+    #[test]
+    fn nvenc_multipass_stays_silent_outside_the_target_bitrate_case() {
+        let mut disabled = sample_config("mp4", "h264_nvenc");
+        disabled.video_bitrate_mode = "bitrate".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &disabled);
+        assert!(
+            !args.iter().any(|arg| arg == "-multipass" || arg == "-2pass"),
+            "默认档不应发出多遍相关参数：{args:?}"
+        );
+
+        let mut quality = sample_config("mp4", "h264_nvenc");
+        quality.nvenc_multipass = "fullres".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &quality);
+        assert!(
+            !args.iter().any(|arg| arg == "-multipass" || arg == "-2pass"),
+            "恒定质量档没有码率目标可分配，不应发出：{args:?}"
+        );
+
+        let mut bogus = sample_config("mp4", "h264_nvenc");
+        bogus.video_bitrate_mode = "bitrate".to_string();
+        bogus.nvenc_multipass = "-vf dump".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &bogus);
+        assert!(
+            !args.iter().any(|arg| arg.contains("dump") || arg == "-multipass"),
+            "非法档位不得进入命令行：{args:?}"
+        );
+
+        let mut software = sample_config("mp4", "libx264");
+        software.video_bitrate_mode = "bitrate".to_string();
+        software.nvenc_multipass = "fullres".to_string();
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &software);
+        assert!(
+            !args.iter().any(|arg| arg == "-multipass" || arg == "-2pass"),
+            "软件编码器不应收到 NVENC 专属参数：{args:?}"
+        );
+    }
+
+    #[test]
+    fn two_pass_is_declared_only_for_capable_software_encoders() {
+        let mut software = sample_config("mp4", "libx264");
+        software.video_bitrate_mode = "bitrate".to_string();
+        software.video_two_pass = true;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &software, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-pass", "2"),
+            "软件编码器 + 目标码率档应声明第二遍：{args:?}"
+        );
+
+        let mut quality = software.clone();
+        quality.video_bitrate_mode = "crf".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &quality, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-pass"),
+            "恒定质量档没有码率目标可分配，不应声明两遍：{args:?}"
+        );
+
+        let mut hardware = sample_config("mp4", "h264_nvenc");
+        hardware.video_bitrate_mode = "bitrate".to_string();
+        hardware.video_two_pass = true;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &hardware, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-pass"),
+            "硬件编码器走 -multipass，不应发 -pass：{args:?}"
+        );
+
+        let mut single = software;
+        single.video_two_pass = false;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &single, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-pass"),
+            "未勾选时不应声明两遍：{args:?}"
+        );
     }
 
     #[test]

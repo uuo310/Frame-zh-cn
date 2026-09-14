@@ -85,6 +85,23 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
             args.push("-temporal_aq".to_string());
             args.push("1".to_string());
         }
+        // 预看帧数：0 表示不发，跟随 NVENC 默认（关闭预看）。
+        if config.nvenc_rc_lookahead > 0 {
+            args.push("-rc-lookahead".to_string());
+            args.push(config.nvenc_rc_lookahead.to_string());
+        }
+        // 多遍分析：qres／fullres 的含义就是「两遍模式里分析遍用什么分辨率」，
+        // 只发 -multipass 而不切到两遍率控，NVENC 仍按单遍处理（实测输出无差异），
+        // 因此两个参数一起发。只接受这两个合法值，其余一律忽略；且只在目标码率档发
+        // ——恒定质量没有码率目标可分配。
+        if config.video_bitrate_mode == "bitrate"
+            && matches!(config.nvenc_multipass.as_str(), "qres" | "fullres")
+        {
+            args.push("-2pass".to_string());
+            args.push("1".to_string());
+            args.push("-multipass".to_string());
+            args.push(config.nvenc_multipass.clone());
+        }
     }
 
     if is_videotoolbox && config.videotoolbox_allow_sw {

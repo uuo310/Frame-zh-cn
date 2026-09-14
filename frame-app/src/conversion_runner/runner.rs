@@ -124,7 +124,7 @@ fn run_prepared_conversion_task_with_control(
         &task.config.container,
         task.output_name.as_deref(),
     );
-    let args = build_ffmpeg_args_with_hwaccel(
+    let mut args = build_ffmpeg_args_with_hwaccel(
         &task.file_path,
         &output_path,
         &task.config,
@@ -133,10 +133,32 @@ fn run_prepared_conversion_task_with_control(
     )?;
     let executable = ffmpeg_executable();
 
+    // 两遍编码：统计文件按任务命名，函数退出时（成功、失败、取消都算）自动清理。
+    let stats = TaskStats::begin(&task);
+    if let Some(stats) = stats.as_ref() {
+        frame_core::twopass::attach_stats_file(&mut args, &stats.path());
+    }
+
     emit(ConversionEvent::log(
         task.id.clone(),
         format!("[INFO] Running {executable} {}", args.join(" ")),
     ));
+
+    if stats.is_some() {
+        let Some(first_pass) = frame_core::twopass::first_pass_args(&args) else {
+            return Err(ConversionError::Worker(
+                "two-pass encoding requested but the command line has no -pass".to_string(),
+            ));
+        };
+        emit(ConversionEvent::log(
+            task.id.clone(),
+            format!("[INFO] Running {executable} {}", first_pass.join(" ")),
+        ));
+        if !run_stats_pass(&executable, &first_pass, &task, controller, emit)? {
+            emit_cancelled_task(&task.id, emit);
+            return Ok(());
+        }
+    }
 
     let mut child = Command::new(&executable)
         .args(&args)
@@ -180,6 +202,88 @@ fn run_prepared_conversion_task_with_control(
             "ffmpeg exited with status {status}"
         )))
     }
+}
+
+/// 两遍编码的统计文件守卫：持有本次任务的临时目录与文件名前缀，
+/// 离开作用域时（成功、失败、取消都算）清掉留下的统计文件。
+struct TaskStats {
+    directory: std::path::PathBuf,
+    prefix: String,
+}
+
+impl TaskStats {
+    fn begin(task: &ConversionTask) -> Option<Self> {
+        if !frame_core::twopass::is_active(&task.config) {
+            return None;
+        }
+
+        Some(Self {
+            directory: std::env::temp_dir(),
+            prefix: frame_core::twopass::stats_file_name(&task.id),
+        })
+    }
+
+    fn path(&self) -> std::path::PathBuf {
+        self.directory.join(&self.prefix)
+    }
+}
+
+impl Drop for TaskStats {
+    fn drop(&mut self) {
+        frame_core::twopass::cleanup_stats(&self.directory, &self.prefix);
+    }
+}
+
+/// 跑两遍编码的第一遍（只统计、不产出文件）。返回 `false` 表示任务在这一遍被取消。
+///
+/// # Errors
+///
+/// 统计进程启动或状态读取失败，或第一遍以非零状态退出时返回错误。
+fn run_stats_pass(
+    executable: &str,
+    args: &[String],
+    task: &ConversionTask,
+    controller: &ConversionProcessController,
+    emit: &mut impl FnMut(ConversionEvent),
+) -> Result<bool, ConversionError> {
+    let mut child = Command::new(executable)
+        .args(args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(ConversionError::Io)?;
+
+    let cancelled_on_start = controller.register_started_process(&task.id, child.id())?;
+    let mut stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| ConversionError::Worker("ffmpeg stderr was not captured".to_string()))?;
+
+    // 统计遍不驱动进度条：它的耗时与最终产物不成比例，报进度只会误导。
+    let mut forward_logs = |event: ConversionEvent| {
+        if matches!(event, ConversionEvent::Progress(_)) {
+            return;
+        }
+        emit(event);
+    };
+    let stream_result = stream_ffmpeg_stderr(&mut stderr, task, &mut forward_logs);
+
+    let status = child.wait().map_err(ConversionError::Io);
+    let was_cancelled = controller.finish_task(&task.id)? || cancelled_on_start;
+    stream_result?;
+    let status = status?;
+
+    if was_cancelled {
+        return Ok(false);
+    }
+    if !status.success() {
+        return Err(ConversionError::Worker(format!(
+            "ffmpeg first pass (stats) exited with status {status}"
+        )));
+    }
+
+    Ok(true)
 }
 
 fn spawn_batch_worker(

@@ -372,6 +372,15 @@ pub struct ConversionConfig {
     pub nvenc_spatial_aq: bool,
     #[serde(default)]
     pub nvenc_temporal_aq: bool,
+    /// 两遍编码（FFmpeg `-pass 1/2`），仅软件编码器与目标码率档生效。默认关闭＝单遍。
+    #[serde(default)]
+    pub video_two_pass: bool,
+    /// NVENC 预看帧数（`-rc-lookahead`）。0 表示不发该参数，即跟随默认关闭。
+    #[serde(default)]
+    pub nvenc_rc_lookahead: u32,
+    /// NVENC 多遍分析档位：`disabled`／`qres`／`fullres`。默认 `disabled`，即不发相关参数。
+    #[serde(default = "default_nvenc_multipass")]
+    pub nvenc_multipass: String,
     #[serde(default)]
     pub videotoolbox_allow_sw: bool,
     #[serde(default = "default_hw_decode")]
@@ -430,6 +439,10 @@ fn default_audio_bitrate_mode() -> String {
 
 fn default_audio_quality() -> String {
     "4".to_string()
+}
+
+fn default_nvenc_multipass() -> String {
+    "disabled".to_string()
 }
 
 const fn default_hw_decode() -> bool {

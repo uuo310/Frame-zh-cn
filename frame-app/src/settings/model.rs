@@ -676,6 +676,9 @@ pub struct ConversionConfig {
     pub gif_loop: u16,
     pub nvenc_spatial_aq: bool,
     pub nvenc_temporal_aq: bool,
+    pub nvenc_rc_lookahead: u32,
+    pub nvenc_multipass: String,
+    pub video_two_pass: bool,
     pub videotoolbox_allow_sw: bool,
     pub hw_decode: bool,
 }
@@ -739,6 +742,9 @@ impl Default for ConversionConfig {
             gif_loop: DEFAULT_GIF_LOOP,
             nvenc_spatial_aq: false,
             nvenc_temporal_aq: false,
+            nvenc_rc_lookahead: 0,
+            video_two_pass: false,
+            nvenc_multipass: "disabled".to_string(),
             videotoolbox_allow_sw: false,
             hw_decode: false,
         }

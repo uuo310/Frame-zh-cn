@@ -261,6 +261,7 @@ pub(in crate::app) fn settings_video_tab(
                 config,
                 settings_disabled,
                 palette,
+                window,
                 cx,
             ))
         })
@@ -602,7 +603,31 @@ fn settings_video_quality_section(
                         cx.notify();
                     }
                 },
-            ));
+            ))
+            .when(
+                frame_core::twopass::is_supported(&config.video_codec),
+                |this| {
+                    this.child(settings_video_checkbox_row(
+                        "video-two-pass",
+                        "两遍编码",
+                        "先统计整片再分配码率，命中更准，耗时翻倍",
+                        config.video_two_pass,
+                        settings_disabled,
+                        palette,
+                        cx,
+                        move |root, _event, _window, cx| {
+                            if settings_disabled {
+                                return;
+                            }
+                            if root.update_selected_config(|config| {
+                                apply_video_two_pass(config, !config.video_two_pass)
+                            }) {
+                                cx.notify();
+                            }
+                        },
+                    ))
+                },
+            );
         if vbv_enabled {
             bitrate = bitrate
                 .child(settings_field_label("最大码率 (kbps)", palette))
@@ -845,7 +870,8 @@ fn settings_video_nvenc_section(
     config: &ConversionConfig,
     disabled: bool,
     palette: &'static theme::ThemePalette,
-    cx: &Context<FrameRoot>,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     settings_section("NVENC 选项", palette)
         .child(settings_video_checkbox_row(
@@ -886,6 +912,108 @@ fn settings_video_nvenc_section(
                 }
             },
         ))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .pt(theme::ui_rem(4.0))
+                .child(settings_field_label("预看帧数", palette))
+                .child(settings_video_nvenc_lookahead_grid(
+                    config, disabled, palette, window, cx,
+                ))
+                .child(settings_hint_text(
+                    "提前分析后续帧以改善码率与帧类型决策，会增加耗时。",
+                    palette,
+                )),
+        )
+        .when(config.video_bitrate_mode == "bitrate", |this| {
+            this.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .pt(theme::ui_rem(4.0))
+                    .child(settings_field_label("多遍分析", palette))
+                    .child(settings_video_nvenc_multipass_grid(
+                        config, disabled, palette, window, cx,
+                    ))
+                    .child(settings_hint_text(
+                        "先分析整片再分配码率，只在目标码率档生效，会增加耗时。",
+                        palette,
+                    )),
+            )
+        })
+}
+
+fn settings_video_nvenc_multipass_grid(
+    config: &ConversionConfig,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let mut grid = div().grid().grid_cols(3).gap_2();
+    for (mode, label) in [
+        ("disabled", "关闭"),
+        ("qres", "1/4 分辨率"),
+        ("fullres", "全分辨率"),
+    ] {
+        grid = grid.child(
+            frame_choice_button(
+                format!("video-nvenc-multipass-{mode}"),
+                label,
+                config.nvenc_multipass == mode,
+                !disabled,
+                palette,
+                window,
+                cx,
+            )
+            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if disabled {
+                    return;
+                }
+                if root.update_selected_config(|config| apply_nvenc_multipass(config, mode)) {
+                    cx.notify();
+                }
+            })),
+        );
+    }
+    grid
+}
+
+fn settings_video_nvenc_lookahead_grid(
+    config: &ConversionConfig,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let mut grid = div().grid().grid_cols(3).gap_2();
+    for (frames, label) in [(0_u32, "关闭"), (20, "20 帧"), (40, "40 帧")] {
+        grid = grid.child(
+            frame_choice_button(
+                format!("video-nvenc-lookahead-{frames}"),
+                label,
+                config.nvenc_rc_lookahead == frames,
+                !disabled,
+                palette,
+                window,
+                cx,
+            )
+            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if disabled {
+                    return;
+                }
+                if root.update_selected_config(|config| apply_nvenc_rc_lookahead(config, frames)) {
+                    cx.notify();
+                }
+            })),
+        );
+    }
+    grid
 }
 
 fn settings_video_videotoolbox_section(

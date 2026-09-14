@@ -184,6 +184,9 @@ fn core_config_from_gpui_preserves_active_conversion_fields() {
         gif_loop: 3,
         nvenc_spatial_aq: false,
         nvenc_temporal_aq: false,
+        nvenc_rc_lookahead: 0,
+        video_two_pass: false,
+        nvenc_multipass: "disabled".to_string(),
         videotoolbox_allow_sw: false,
         hw_decode: false,
     };

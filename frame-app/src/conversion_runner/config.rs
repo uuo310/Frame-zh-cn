@@ -3,9 +3,9 @@ use frame_core::{
     types::{
         AudioFiltersConfig as CoreAudioFiltersConfig, ConversionConfig as CoreConversionConfig,
         ConversionTask, CropConfig, DeinterlaceMode as CoreDeinterlaceMode,
-        FilterStrength as CoreFilterStrength, FilterValue as CoreFilterValue,
-        HwDecodeBackend, MetadataConfig as CoreMetadataConfig, MetadataMode as CoreMetadataMode,
-        OverlayConfig, VideoColorFiltersConfig as CoreVideoColorFiltersConfig,
+        FilterStrength as CoreFilterStrength, FilterValue as CoreFilterValue, HwDecodeBackend,
+        MetadataConfig as CoreMetadataConfig, MetadataMode as CoreMetadataMode, OverlayConfig,
+        VideoColorFiltersConfig as CoreVideoColorFiltersConfig,
         VideoFiltersConfig as CoreVideoFiltersConfig,
     },
 };
@@ -110,6 +110,9 @@ pub fn core_config_from_gpui(config: &GpuiConversionConfig) -> CoreConversionCon
         overlay: config.overlay.as_ref().map(core_overlay_from_gpui),
         nvenc_spatial_aq: config.nvenc_spatial_aq,
         nvenc_temporal_aq: config.nvenc_temporal_aq,
+        nvenc_rc_lookahead: config.nvenc_rc_lookahead,
+        nvenc_multipass: non_empty_or(&config.nvenc_multipass, "disabled"),
+        video_two_pass: config.video_two_pass,
         videotoolbox_allow_sw: config.videotoolbox_allow_sw,
         hw_decode: config.hw_decode,
         pixel_format: non_empty_or(&config.pixel_format, DEFAULT_PIXEL_FORMAT),

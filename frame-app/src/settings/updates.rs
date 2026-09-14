@@ -567,6 +567,25 @@ pub fn apply_video_bitrate_mode(config: &mut ConversionConfig, mode: &str) -> bo
     }
 
     config.video_bitrate_mode = mode;
+    // 多遍分析与两遍编码只在目标码率档有意义（恒定质量没有码率目标可分配）：
+    // 切回恒定质量时一并复位，避免留下看不见却仍会发参数的状态。
+    if config.video_bitrate_mode == "crf" {
+        config.nvenc_multipass = "disabled".to_string();
+        config.video_two_pass = false;
+    }
+    true
+}
+
+/// 两遍编码开关。仅支持 `-pass` 的软件编码器、且处于目标码率档时可开。
+pub fn apply_video_two_pass(config: &mut ConversionConfig, enabled: bool) -> bool {
+    if !frame_core::twopass::is_supported(&config.video_codec)
+        || config.video_bitrate_mode != "bitrate"
+        || config.video_two_pass == enabled
+    {
+        return false;
+    }
+
+    config.video_two_pass = enabled;
     true
 }
 
@@ -609,8 +628,8 @@ pub fn apply_video_vbv_enabled(config: &mut ConversionConfig, enabled: bool) -> 
         let target = config.video_bitrate.parse::<u32>().unwrap_or(5000);
         let maxrate = (f64::from(target) * 1.45).round() as u32;
         let bufsize = maxrate * 2;
-        let changed =
-            config.video_maxrate != maxrate.to_string() || config.video_bufsize != bufsize.to_string();
+        let changed = config.video_maxrate != maxrate.to_string()
+            || config.video_bufsize != bufsize.to_string();
         config.video_maxrate = maxrate.to_string();
         config.video_bufsize = bufsize.to_string();
         changed
@@ -764,6 +783,29 @@ pub fn apply_nvenc_temporal_aq(config: &mut ConversionConfig, enabled: bool) -> 
     }
 
     config.nvenc_temporal_aq = enabled;
+    true
+}
+
+/// NVENC 预看帧数（`-rc-lookahead`）。仅 NVENC 可设，0 表示关闭预看（现状行为）。
+pub fn apply_nvenc_rc_lookahead(config: &mut ConversionConfig, frames: u32) -> bool {
+    if !is_nvenc_video_codec(&config.video_codec) || config.nvenc_rc_lookahead == frames {
+        return false;
+    }
+
+    config.nvenc_rc_lookahead = frames;
+    true
+}
+
+/// NVENC 多遍分析档位（`-multipass`）。仅 NVENC 可设，只接受 `disabled`／`qres`／`fullres`。
+pub fn apply_nvenc_multipass(config: &mut ConversionConfig, mode: &str) -> bool {
+    if !is_nvenc_video_codec(&config.video_codec)
+        || !matches!(mode, "disabled" | "qres" | "fullres")
+        || config.nvenc_multipass == mode
+    {
+        return false;
+    }
+
+    config.nvenc_multipass = mode.to_string();
     true
 }
 
@@ -1021,6 +1063,8 @@ pub fn normalize_video_config(
     if !is_nvenc_video_codec(&config.video_codec) {
         config.nvenc_spatial_aq = false;
         config.nvenc_temporal_aq = false;
+        config.nvenc_rc_lookahead = 0;
+        config.nvenc_multipass = "disabled".to_string();
     }
     if !is_videotoolbox_video_codec(&config.video_codec) {
         config.videotoolbox_allow_sw = false;
