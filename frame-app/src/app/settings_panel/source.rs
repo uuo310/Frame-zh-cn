@@ -401,8 +401,9 @@ fn settings_analysis_card(body: gpui::Div) -> gpui::Div {
 }
 
 /// 分析页专用值行：label 单行不折（`whitespace_nowrap` + `flex_none`），
-/// 值列右缘统一预留 ？ 图标位（`ui_rem(20)` = gap 8 + icon 12）——
-/// 与 `settings_analysis_value_row_with_help` 行的值右缘严格等位（批 N）。
+/// 值列右缘贴卡片右缘（无 ？ 预留）——用于无 ？ 行的卡片（如「实际码率」
+/// 三行）：批 N 的 20px 预留在那张卡里是纯死空间，最长 label 行会被挤到
+/// 只剩 4px 间隔（2026-09-15 实机像素实测）。
 /// 不复用共享 `settings_value_row`——那是 grid 2 列，窄面板下 label 会被
 /// 压缩折行，且改动会辐射全部设置页。
 fn settings_analysis_value_row(
@@ -412,12 +413,13 @@ fn settings_analysis_value_row(
 ) -> gpui::Div {
     // 批 T：改用 **grid 2 列**（与共享 settings_value_row 同机制）——列宽由
     // 模板强制确定，text_right 在确定宽度里必然贴右；此前 flex justify_between
-    // 在 GPUI 宽度链上反复失效（批 N/O/P/R 四轮）。值右缘统一预留 ？ 图标位
-    // （gap 8 + icon 12 = 20px），与 with_help 行严格等位。
+    // 在 GPUI 宽度链上反复失效（批 N/O/P/R 四轮）。
     // 2026-09-15 补：根 div 加 w_full——GPUI flex_col 子项默认不横向拉伸
     // （批 O 同款坑），grid 收缩到内容宽后 1fr 列失效，值缩回 label 旁
     // （用户实机反馈「值与标题相隔太近」）；拉满后 label 贴左、值贴卡片
     // 右缘，与本页「文件信息」块风格一致。
+    // 批 U2：删掉 20px ？ 预留占位——无 ？ 行的卡片里它是纯死空间，把最长
+    // label 行的间隔挤到 4px；删后值右缘真贴卡缘，间隔恢复健康节奏。
     div()
         .w_full()
         .grid()
@@ -434,10 +436,8 @@ fn settings_analysis_value_row(
                 .flex()
                 .items_center()
                 .justify_end()
-                .gap_2()
                 .text_color(color(palette.text_primary))
-                .child(value.into())
-                .child(div().flex_none().w(theme::ui_rem(12.0))),
+                .child(value.into()),
         )
 }
 
@@ -473,7 +473,8 @@ fn settings_analysis_value_row_with_help(
         cx,
     );
     // 2026-09-15 补 w_full（同 settings_analysis_value_row）：拉满行宽，
-    // 值贴卡片右缘；？ 图标随值组一起贴右，两行值右缘保持严格等位。
+    // 值贴卡片右缘；？ 图标随值组一起贴右，与同卡无 ？ 行值右缘严格等位
+    // （该卡值右缘 = 卡缘，普通行的值右缘也 = 卡缘）。
     div()
         .w_full()
         .grid()
@@ -733,6 +734,11 @@ fn settings_bitrate_curve(
     // 用户实机反馈线不可见——0.35 叠加 1px 虚线、且低平均码率素材平均线贴底
     // 埋进柱列。0.60 亮于网格线（α0.10）、弱于柱列常态（α0.7），可见不抢戏。
     // 位置与统计块「实际平均码率」同源同算式（全窗算术平均，含空窗）。
+    // 批 U2：横向虚线画法从 h_0+border_t_1 改为实高 1px 背景色——实机像素
+    // 扫描证实 h_0+border_t 在本 GPUI 版本下不产出可见像素（平均线与 5 条
+    // 网格线同时消失，同根因）；改为 h(1)+bg 后虚线纹理由 border_dashed 在
+    // 元素自身边框上……不再可用，故虚线感由 α 低亮度自然形成（网格 α0.10、
+    // 平均 α0.60 与柱列的亮度差足够区分层级）。
     let mut avg_line_color = color(palette.text_primary);
     avg_line_color.a *= 0.60;
     let mut axis_text_color = color(palette.text_muted);
@@ -790,10 +796,8 @@ fn settings_bitrate_curve(
                 .left_0()
                 .right_0()
                 .bottom(px((tick / y_top * f64::from(BITRATE_CURVE_HEIGHT_PX)) as f32))
-                .h_0()
-                .border_t_1()
-                .border_dashed()
-                .border_color(grid_color),
+                .h(px(1.0))
+                .bg(grid_color),
         );
     }
 
@@ -847,10 +851,8 @@ fn settings_bitrate_curve(
                 .left_0()
                 .right_0()
                 .bottom(px(avg_bottom))
-                .h_0()
-                .border_t_1()
-                .border_dashed()
-                .border_color(avg_line_color),
+                .h(px(1.0))
+                .bg(avg_line_color),
         );
 
     // X 轴刻度行 + 下方一行「时间 (s)」轴标签（justify_end，贴末刻度右下）。
