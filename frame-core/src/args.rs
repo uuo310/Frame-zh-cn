@@ -2010,6 +2010,43 @@ mod tests {
     }
 
     #[test]
+    fn prores_emits_only_the_encoder_and_its_tier() {
+        // ProRes 固定档位体系：实测 -crf/-b:v/-preset 对它全无效（带与不带产物
+        // 逐字节一致）⇒ 参数表里不应出现这些死参数，只发编码器与档位。
+        let mut config = sample_config("mov", "prores");
+        config.video_bitrate_mode = "crf".to_string();
+        config.prores_profile = "hq".to_string();
+        let args = build_ffmpeg_args("in.mov", "out.mov", &config, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-c:v", "prores_ks"),
+            "ProRes 应走 prores_ks：{args:?}"
+        );
+        assert!(
+            args_contains_pair(&args, "-profile:v", "3"),
+            "档位应发射：{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| matches!(
+                arg.as_str(),
+                "-crf" | "-b:v" | "-preset" | "-maxrate" | "-bufsize"
+            )),
+            "ProRes 不应收到率控/预设死参数：{args:?}"
+        );
+
+        // 目标码率档同样不发码率参数。
+        let mut bitrate = sample_config("mov", "prores");
+        bitrate.video_bitrate_mode = "bitrate".to_string();
+        bitrate.video_maxrate = "8000".to_string();
+        let args = build_ffmpeg_args("in.mov", "out.mov", &bitrate, &sample_probe()).unwrap();
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg == "-b:v" || arg == "-maxrate" || arg == "-preset"),
+            "目标码率档对 ProRes 也不发：{args:?}"
+        );
+    }
+
+    #[test]
     fn psy_params_travel_in_a_single_merged_params_flag() {
         // x265：psy 与两遍精炼合并成一条 -x265-params
         let mut merged = sample_config("mp4", "libx265");

@@ -13,6 +13,7 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
     let is_nvenc = is_nvenc_codec(&config.video_codec);
     let is_svt_av1 = is_svt_av1_codec(&config.video_codec);
     let is_videotoolbox = is_videotoolbox_codec(&config.video_codec);
+    let is_prores = config.video_codec == "prores";
 
     args.push("-c:v".to_string());
     // ProRes 走 prores_ks（generic `prores` 无档位选项，质量控件是死旋钮）。
@@ -35,7 +36,12 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
         return;
     }
 
-    if config.video_bitrate_mode == "bitrate" {
+    if is_prores {
+        // ProRes 是固定档位体系：没有 CRF／码率目标／VBV／预设这些概念。
+        // 实测（pin 8.1.2）发 `-crf`/`-preset` 会被 ffmpeg 忽略并警告
+        // 「has not been used for any stream」，`-b:v` 为通用字段同样不生效；
+        // 带与不带这些参数产物逐字节一致 ⇒ 一律不发。质量控制＝档位（见 profile.rs）。
+    } else if config.video_bitrate_mode == "bitrate" {
         // NVENC：显式声明 vbr 率控模式（与默认行为一致，但自解释）。软编无需 -rc。
         if is_nvenc {
             args.push("-rc:v".to_string());
@@ -68,7 +74,7 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
         args.push(config.crf.to_string());
     }
 
-    if !is_videotoolbox {
+    if !is_videotoolbox && !is_prores {
         args.push("-preset".to_string());
         let preset_value = if is_nvenc {
             map_nvenc_preset(&config.preset)

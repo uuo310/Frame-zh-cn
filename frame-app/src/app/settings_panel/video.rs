@@ -235,7 +235,9 @@ pub(in crate::app) fn settings_video_tab(
             cx,
         ))
         .when(
-            !is_videotoolbox_video_codec(&config.video_codec) && config.video_codec != "mpeg2video",
+            !is_videotoolbox_video_codec(&config.video_codec)
+                && config.video_codec != "mpeg2video"
+                && config.video_codec != "prores",
             |this| {
                 this.child(video_select_row(
                     VideoSelectRowState {
@@ -272,15 +274,6 @@ pub(in crate::app) fn settings_video_tab(
                 ))
             },
         )
-        .when(config.video_codec == "prores", |this| {
-            this.child(settings_video_prores_profile_block(
-                config,
-                settings_disabled,
-                palette,
-                window,
-                cx,
-            ))
-        })
         .when(
             config.video_codec == "libx264" || config.video_codec == "libx265",
             |this| {
@@ -556,6 +549,19 @@ fn settings_video_quality_section(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let mut section = settings_section("质量控制", palette);
+    // ProRes 的质量控制＝档位（无 CRF/码率/VBV：底层没有这些选项，实测发出去
+    // 只会得到「has not been used for any stream」警告）。
+    if config.video_codec == "prores" {
+        return section
+            .child(settings_field_label("ProRes 档位", palette))
+            .child(settings_video_prores_profile_grid(
+                config,
+                settings_disabled,
+                palette,
+                window,
+                cx,
+            ));
+    }
     if config.video_codec != "mpeg2video" {
         section = section.child(settings_video_bitrate_mode_grid(
             config,
@@ -911,7 +917,8 @@ fn settings_video_profile_block(
 }
 
 /// ProRes 档位（官方档位体系；ProRes 走 prores_ks 编码器）。
-fn settings_video_prores_profile_block(
+/// 渲染进「质量控制」块内（对 ProRes 而言档位就是它的质量控制）。
+fn settings_video_prores_profile_grid(
     config: &ConversionConfig,
     disabled: bool,
     palette: &'static theme::ThemePalette,
@@ -955,12 +962,7 @@ fn settings_video_prores_profile_block(
             })),
         );
     }
-    div()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(settings_field_label("ProRes 档位", palette))
-        .child(grid)
+    grid
 }
 
 fn settings_video_bitrate_mode_grid(
