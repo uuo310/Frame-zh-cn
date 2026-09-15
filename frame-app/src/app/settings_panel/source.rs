@@ -414,7 +414,12 @@ fn settings_analysis_value_row(
     // 模板强制确定，text_right 在确定宽度里必然贴右；此前 flex justify_between
     // 在 GPUI 宽度链上反复失效（批 N/O/P/R 四轮）。值右缘统一预留 ？ 图标位
     // （gap 8 + icon 12 = 20px），与 with_help 行严格等位。
+    // 2026-09-15 补：根 div 加 w_full——GPUI flex_col 子项默认不横向拉伸
+    // （批 O 同款坑），grid 收缩到内容宽后 1fr 列失效，值缩回 label 旁
+    // （用户实机反馈「值与标题相隔太近」）；拉满后 label 贴左、值贴卡片
+    // 右缘，与本页「文件信息」块风格一致。
     div()
+        .w_full()
         .grid()
         .grid_cols(2)
         .gap_2()
@@ -467,7 +472,10 @@ fn settings_analysis_value_row_with_help(
         window,
         cx,
     );
+    // 2026-09-15 补 w_full（同 settings_analysis_value_row）：拉满行宽，
+    // 值贴卡片右缘；？ 图标随值组一起贴右，两行值右缘保持严格等位。
     div()
+        .w_full()
         .grid()
         .grid_cols(2)
         .gap_2()
@@ -721,9 +729,12 @@ fn settings_bitrate_curve(
     let accent_color = color(palette.accent);
     let mut grid_color = color(palette.text_primary);
     grid_color.a *= 0.10;
-    // 平均线恢复最初样式（批 Q 裁定：只要淡虚线不要标注）。
+    // 平均线：淡虚线、无标注（批 Q 裁定）。2026-09-15 不透明度 0.35 → 0.60：
+    // 用户实机反馈线不可见——0.35 叠加 1px 虚线、且低平均码率素材平均线贴底
+    // 埋进柱列。0.60 亮于网格线（α0.10）、弱于柱列常态（α0.7），可见不抢戏。
+    // 位置与统计块「实际平均码率」同源同算式（全窗算术平均，含空窗）。
     let mut avg_line_color = color(palette.text_primary);
-    avg_line_color.a *= 0.35;
+    avg_line_color.a *= 0.60;
     let mut axis_text_color = color(palette.text_muted);
     axis_text_color.a *= 0.9;
 
