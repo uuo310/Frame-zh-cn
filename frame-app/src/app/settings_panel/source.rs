@@ -688,6 +688,28 @@ fn settings_analysis_subheader(label: String, palette: &'static theme::ThemePale
         .child(theme::ui_text_owned(label))
 }
 
+/// 横向虚线（bg 段拼装）：在 1px 高的行内用实/空交替的定宽段拼出虚线纹里。
+/// 背景：`h_0 + border_t + border_dashed` 在本 GPUI 版本（gpui-ce 0.2.2 /
+/// taffy 0.10.1）下不产出可见像素（批 U2 像素实测）；`h(1)+bg` 可见但是
+/// 实线（批 U3 实机反馈「要虚线不要实线」）——bg 渲染本身可靠，故用段拼。
+/// 结构：`.absolute().left_0().right_0().h(1)` 外层裁剪 + 内层 flex 行铺
+/// 段（flex_none 不伸缩段宽固定，总宽 960px 由 overflow_hidden 截断）。
+fn bitrate_horizontal_dashed_line(line_color: gpui::Rgba) -> gpui::Div {
+    let mut strip = div().flex().h(px(1.0));
+    for _ in 0..96 {
+        strip = strip
+            .child(div().flex_none().w(px(6.0)).h_full().bg(line_color))
+            .child(div().flex_none().w(px(4.0)).h_full());
+    }
+    div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .h(px(1.0))
+        .overflow_hidden()
+        .child(strip)
+}
+
 /// 柱列曲线（C2 后内含 hover 浮层 + 峰值/最低整柱改色）。
 ///
 /// 每根柱对应一组连续窗口的包络峰值；hover 到柱 i 即时浮层显示「该柱覆盖
@@ -734,11 +756,9 @@ fn settings_bitrate_curve(
     // 用户实机反馈线不可见——0.35 叠加 1px 虚线、且低平均码率素材平均线贴底
     // 埋进柱列。0.60 亮于网格线（α0.10）、弱于柱列常态（α0.7），可见不抢戏。
     // 位置与统计块「实际平均码率」同源同算式（全窗算术平均，含空窗）。
-    // 批 U2：横向虚线画法从 h_0+border_t_1 改为实高 1px 背景色——实机像素
-    // 扫描证实 h_0+border_t 在本 GPUI 版本下不产出可见像素（平均线与 5 条
-    // 网格线同时消失，同根因）；改为 h(1)+bg 后虚线纹理由 border_dashed 在
-    // 元素自身边框上……不再可用，故虚线感由 α 低亮度自然形成（网格 α0.10、
-    // 平均 α0.60 与柱列的亮度差足够区分层级）。
+    // 批 U2：h_0+border_t 画法在本 GPUI 版本下不产出可见像素（像素实测），
+    // 改 h(1)+bg 后可见但是实线；批 U3 实机裁定「要虚线不要实线」→ 改
+    // bg 段拼虚线（`bitrate_horizontal_dashed_line`，实/空交替 6/4px）。
     let mut avg_line_color = color(palette.text_primary);
     avg_line_color.a *= 0.60;
     let mut axis_text_color = color(palette.text_muted);
@@ -788,16 +808,18 @@ fn settings_bitrate_curve(
     }
 
     // 横向网格虚线：内部刻度线（跳过 0 与顶格），与 Y 刻度一一对应。
-    let mut grid_lines = div();
+    // 批 U3：线节点改为 plot 的**直接子节点**——此前挂在无尺寸容器里，
+    // taffy 绝对定位按 0×0 父盒算 offset，线「逃逸」到绘图区上方（实机
+    // 截图可见线画在统计卡/标题行上）；同时用 bg 段拼虚线替代实线。
+    let mut plot = div()
+        .relative()
+        .flex_1()
+        .min_w_0()
+        .h(px(BITRATE_CURVE_HEIGHT_PX));
     for tick in y_ticks.iter().skip(1).take(y_ticks.len().saturating_sub(2)) {
-        grid_lines = grid_lines.child(
-            div()
-                .absolute()
-                .left_0()
-                .right_0()
-                .bottom(px((tick / y_top * f64::from(BITRATE_CURVE_HEIGHT_PX)) as f32))
-                .h(px(1.0))
-                .bg(grid_color),
+        plot = plot.child(
+            bitrate_horizontal_dashed_line(grid_color)
+                .bottom(px((tick / y_top * f64::from(BITRATE_CURVE_HEIGHT_PX)) as f32)),
         );
     }
 
@@ -838,21 +860,10 @@ fn settings_bitrate_curve(
     }
 
     // 绘图区：网格线在下、柱列在中、平均线在上。
-    let plot = div()
-        .relative()
-        .flex_1()
-        .min_w_0()
-        .h(px(BITRATE_CURVE_HEIGHT_PX))
-        .child(grid_lines)
+    let plot = plot
         .child(bars)
         .child(
-            div()
-                .absolute()
-                .left_0()
-                .right_0()
-                .bottom(px(avg_bottom))
-                .h(px(1.0))
-                .bg(avg_line_color),
+            bitrate_horizontal_dashed_line(avg_line_color).bottom(px(avg_bottom)),
         );
 
     // X 轴刻度行 + 下方一行「时间 (s)」轴标签（justify_end，贴末刻度右下）。
