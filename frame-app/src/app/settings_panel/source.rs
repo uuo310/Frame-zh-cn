@@ -916,6 +916,16 @@ fn settings_bitrate_curve(
                 .text_color(axis_text_color)
                 .child(theme::ui_text(axis_unit)),
         )
+        // 批 U5：绘图区整体下移一行，字样「码率 (Mb/s)」原位不动（用户
+        // 00:02 明确效果；U4 的错误解释已于 23:49 整体回退）。在单位行与
+        // 绘图区之间垫一行与单位行同字号的空格行（NBSP），行盒高度与
+        // 单位行自然一致，视觉上即「下移一行」。
+        .child(
+            div()
+                .text_size(theme::ui_rem(BITRATE_AXIS_UNIT_TEXT_SIZE))
+                .text_color(axis_text_color)
+                .child(theme::ui_text_owned("\u{00a0}".to_string())),
+        )
         .child(chart)
         .child(
             div()
