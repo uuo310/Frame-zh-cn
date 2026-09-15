@@ -2325,3 +2325,71 @@ mod x265_multipass_opt {
         assert!(!vp9.x265_multipass_opt_distortion);
     }
 }
+
+mod psy {
+    use super::*;
+
+    #[test]
+    fn psy_values_validate_ranges_and_codec_gates() {
+        let mut x265 = ConversionConfig {
+            video_codec: "libx265".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        // 合法值接受
+        assert!(apply_x265_psy_rd(&mut x265, "3"));
+        assert_eq!(x265.x265_psy_rd, "3");
+        assert!(apply_x265_psy_rdoq(&mut x265, "12.5"));
+        assert_eq!(x265.x265_psy_rdoq, "12.5");
+
+        // 越界拒收
+        assert!(!apply_x265_psy_rd(&mut x265, "5.1"));
+        assert!(!apply_x265_psy_rdoq(&mut x265, "61"));
+
+        // 非数字拒收
+        assert!(!apply_x265_psy_rdoq(&mut x265, "abc"));
+
+        // 空串＝清除
+        assert!(apply_x265_psy_rd(&mut x265, " "));
+        assert_eq!(x265.x265_psy_rd, "");
+
+        // 编码器门控：x265 字段只在 libx265 下可改
+        let mut x264 = ConversionConfig {
+            video_codec: "libx264".to_string(),
+            ..ConversionConfig::default()
+        };
+        assert!(!apply_x265_psy_rd(&mut x264, "3"));
+        assert!(apply_x264_psy_rd(&mut x264, "2.5"));
+        assert_eq!(x264.x264_psy_rd, "2.5");
+        assert!(!apply_x264_psy_rd(&mut x264, "10.1"), "x264 上限 10");
+
+        // x264 总开关只在 libx264 下可改
+        assert!(!apply_x264_disable_psy(&mut x265, true));
+        assert!(apply_x264_disable_psy(&mut x264, true));
+        assert!(x264.x264_disable_psy);
+    }
+
+    #[test]
+    fn switching_codec_clears_the_psy_fields() {
+        let mut x265 = ConversionConfig {
+            video_codec: "libx265".to_string(),
+            ..ConversionConfig::default()
+        };
+        x265.x265_psy_rd = "3".to_string();
+        x265.x265_psy_rdoq = "10".to_string();
+
+        assert!(apply_video_codec(&mut x265, "libx264"));
+        assert_eq!(x265.x265_psy_rd, "");
+        assert_eq!(x265.x265_psy_rdoq, "");
+
+        let mut x264 = ConversionConfig {
+            video_codec: "libx264".to_string(),
+            ..ConversionConfig::default()
+        };
+        x264.x264_disable_psy = true;
+        x264.x264_psy_rd = "2".to_string();
+        assert!(apply_video_codec(&mut x264, "libx265"));
+        assert!(!x264.x264_disable_psy);
+        assert_eq!(x264.x264_psy_rd, "");
+    }
+}

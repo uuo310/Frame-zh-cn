@@ -19,6 +19,7 @@ use crate::media_rules::{
     is_audio_stream_codec_allowed, is_image_container, is_video_codec_allowed,
     is_video_only_container, is_video_pixel_format_allowed, is_video_stream_codec_allowed,
 };
+use crate::psy;
 use crate::twopass;
 use crate::types::{
     AudioTrack, ConversionConfig, ExternalSubtitleTrack, HwDecodeBackend, MetadataConfig,
@@ -738,18 +739,45 @@ pub fn build_ffmpeg_args_with_hwaccel(
 
     // 两遍编码：这里只声明「第二遍＝正式编码」，统计文件路径是运行时信息，
     // 由运行器注入 -passlogfile（见 frame_core::twopass）。
-    if twopass::is_active(config) {
+    let two_pass_active = twopass::is_active(config);
+    if two_pass_active {
         args.push("-pass".to_string());
         args.push("2".to_string());
-        // x265 两遍精炼是两遍自身的附加开关，随两遍一起生效；x264/SVT 无对应参数。
-        if let Some(params) = twopass::x265_refinement_params(
+    }
+
+    // -x265-params 单条合并：psy（率控无关，恒定质量/目标码率都生效）与两遍精炼
+    // （仅两遍激活）共用一条键值串，不依赖 ffmpeg 对重复字典参数的合并语义。
+    let mut x265_keys: Vec<String> = Vec::new();
+    if let Some(psy_keys) = psy::x265_psy_keys(
+        &config.video_codec,
+        &config.x265_psy_rd,
+        &config.x265_psy_rdoq,
+    ) {
+        x265_keys.push(psy_keys);
+    }
+    if two_pass_active {
+        // x265 两遍精炼是两遍自身的附加开关；x264/SVT 无对应参数。
+        if let Some(refinement) = twopass::x265_refinement_params(
             &config.video_codec,
             config.x265_multipass_opt_analysis,
             config.x265_multipass_opt_distortion,
         ) {
-            args.push("-x265-params".to_string());
-            args.push(params);
+            x265_keys.push(refinement);
         }
+    }
+    if !x265_keys.is_empty() {
+        args.push("-x265-params".to_string());
+        args.push(x265_keys.join(":"));
+    }
+
+    // -x264-params：psy（率控无关）。
+    if let Some(x264_params) = psy::x264_params(
+        &config.video_codec,
+        config.x264_disable_psy,
+        &config.x264_psy_rd,
+    ) {
+        args.push("-x264-params".to_string());
+        args.push(x264_params);
     }
 
     args.push("-dn".to_string());
@@ -1569,6 +1597,10 @@ mod tests {
             nvenc_multipass: "disabled".to_string(),
             x265_multipass_opt_analysis: false,
             x265_multipass_opt_distortion: false,
+            x264_disable_psy: false,
+            x264_psy_rd: String::new(),
+            x265_psy_rd: String::new(),
+            x265_psy_rdoq: String::new(),
             videotoolbox_allow_sw: false,
             hw_decode: false,
             pixel_format: "auto".to_string(),
@@ -1971,6 +2003,71 @@ mod tests {
         assert!(
             !args.iter().any(|arg| arg == "-x265-params"),
             "两项都关不应发 -x265-params：{args:?}"
+        );
+    }
+
+    #[test]
+    fn psy_params_travel_in_a_single_merged_params_flag() {
+        // x265：psy 与两遍精炼合并成一条 -x265-params
+        let mut merged = sample_config("mp4", "libx265");
+        merged.video_bitrate_mode = "bitrate".to_string();
+        merged.video_two_pass = true;
+        merged.x265_multipass_opt_analysis = true;
+        merged.x265_psy_rd = "4.5".to_string();
+        merged.x265_psy_rdoq = "10".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &merged, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(
+                &args,
+                "-x265-params",
+                "psy-rd=4.5:psy-rdoq=10:rdoq-level=2:multi-pass-opt-analysis=1",
+            ),
+            "psy 与两遍精炼应合并为一条 -x265-params：{args:?}"
+        );
+
+        // 恒定质量档：无 -pass，但 psy 与率控正交、仍然生效
+        let mut crf = sample_config("mp4", "libx265");
+        crf.video_bitrate_mode = "crf".to_string();
+        crf.x265_psy_rd = "3".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &crf, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-pass"),
+            "恒定质量档不应有两遍：{args:?}"
+        );
+        assert!(
+            args_contains_pair(&args, "-x265-params", "psy-rd=3"),
+            "psy 与率控正交，恒定质量档也应生效：{args:?}"
+        );
+
+        // x264：一条 -x264-params
+        let mut x264 = sample_config("mp4", "libx264");
+        x264.video_bitrate_mode = "crf".to_string();
+        x264.x264_psy_rd = "2".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &x264, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-x264-params", "psy-rd=2"),
+            "x264 psy 应合并为一条 -x264-params：{args:?}"
+        );
+
+        // x264 总开关关闭：只发 psy=0，并抑制 psy-rd（冲突裁决）
+        let mut nopsy = sample_config("mp4", "libx264");
+        nopsy.video_bitrate_mode = "crf".to_string();
+        nopsy.x264_disable_psy = true;
+        nopsy.x264_psy_rd = "2".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &nopsy, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-x264-params", "psy=0"),
+            "总开关关闭应只发 psy=0：{args:?}"
+        );
+
+        // 默认全空：一个 params 参数都不发（与既有行为逐字节一致）
+        let plain = sample_config("mp4", "libx265");
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &plain, &sample_probe()).unwrap();
+        assert!(
+            !args
+                .iter()
+                .any(|arg| arg == "-x265-params" || arg == "-x264-params"),
+            "psy 全空不应发 params：{args:?}"
         );
     }
 

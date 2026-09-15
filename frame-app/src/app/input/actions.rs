@@ -2,8 +2,9 @@ use super::{
     text::{
         clamp_text_offset, clamp_text_range, next_text_boundary, next_timecode_cursor,
         previous_text_boundary, previous_timecode_cursor, replace_timecode_mask,
-        sanitize_hex_draft, sanitize_number_input, sanitize_replacement_text,
-        text_range_from_utf16, text_range_to_utf16, timecode_cursor_at_or_after,
+        sanitize_decimal_input, sanitize_hex_draft, sanitize_number_input,
+        sanitize_replacement_text, text_range_from_utf16, text_range_to_utf16,
+        timecode_cursor_at_or_after,
     },
     *,
 };
@@ -134,6 +135,18 @@ impl FrameRoot {
                 .file_queue
                 .selected_file()
                 .map_or_else(String::new, |file| file.config.video_bufsize.clone()),
+            FrameTextInputKind::VideoX264PsyRd => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.x264_psy_rd.clone()),
+            FrameTextInputKind::VideoX265PsyRd => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.x265_psy_rd.clone()),
+            FrameTextInputKind::VideoX265PsyRdoq => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.x265_psy_rdoq.clone()),
             FrameTextInputKind::GifLoop => self
                 .file_queue
                 .selected_file()
@@ -277,6 +290,36 @@ impl FrameRoot {
                 let next = sanitize_number_input(candidate);
                 self.file_queue.selected_file_mut().map(|file| {
                     apply_video_bufsize(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoX264PsyRd => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_decimal_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_x264_psy_rd(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoX265PsyRd => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_decimal_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_x265_psy_rd(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoX265PsyRdoq => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_decimal_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_x265_psy_rdoq(&mut file.config, &next);
                 })?;
                 Some(next)
             }

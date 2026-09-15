@@ -14,6 +14,7 @@ pub mod media_filters;
 pub mod media_rules;
 pub mod preview;
 pub mod probe;
+pub mod psy;
 pub mod twopass;
 pub mod types;
 pub mod utils;

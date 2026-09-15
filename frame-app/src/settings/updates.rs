@@ -624,6 +624,70 @@ pub fn apply_x265_multipass_opt_distortion(config: &mut ConversionConfig, enable
     true
 }
 
+const X264_PSY_RD_MAX: f32 = 10.0;
+const X265_PSY_RD_MAX: f32 = 5.0;
+const X265_PSY_RDOQ_MAX: f32 = 60.0;
+
+/// psy 数值清洗：空串＝清除（跟随编码器默认）；非数字或越界＝拒收（None）。
+fn sanitized_psy_value(value: &str, max: f32) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some(String::new());
+    }
+    let parsed: f32 = trimmed.parse().ok()?;
+    (0.0..=max).contains(&parsed).then(|| trimmed.to_string())
+}
+
+/// x264 心理视觉总开关：关闭＝发 `psy=0`（彻底关闭心理视觉，实测独立于把
+/// psy-rd 清零）。默认 false＝不干预（编码器默认开启）。
+pub fn apply_x264_disable_psy(config: &mut ConversionConfig, enabled: bool) -> bool {
+    if config.video_codec != "libx264" || config.x264_disable_psy == enabled {
+        return false;
+    }
+
+    config.x264_disable_psy = enabled;
+    true
+}
+
+/// x264 心理视觉强度（psy-rd，0..=10）。空＝清除。
+pub fn apply_x264_psy_rd(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = sanitized_psy_value(value, X264_PSY_RD_MAX) else {
+        return false;
+    };
+    if config.video_codec != "libx264" || config.x264_psy_rd == next {
+        return false;
+    }
+
+    config.x264_psy_rd = next;
+    true
+}
+
+/// x265 心理视觉强度（psy-rd，0..=5）。空＝清除。
+pub fn apply_x265_psy_rd(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = sanitized_psy_value(value, X265_PSY_RD_MAX) else {
+        return false;
+    };
+    if config.video_codec != "libx265" || config.x265_psy_rd == next {
+        return false;
+    }
+
+    config.x265_psy_rd = next;
+    true
+}
+
+/// x265 畸变精炼（psy-rdoq，0..=60）。空＝清除；>0 时参数层自动携带 rdoq-level=2。
+pub fn apply_x265_psy_rdoq(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = sanitized_psy_value(value, X265_PSY_RDOQ_MAX) else {
+        return false;
+    };
+    if config.video_codec != "libx265" || config.x265_psy_rdoq == next {
+        return false;
+    }
+
+    config.x265_psy_rdoq = next;
+    true
+}
+
 pub fn apply_video_bitrate(config: &mut ConversionConfig, bitrate: &str) -> bool {
     let bitrate: String = bitrate.chars().filter(char::is_ascii_digit).collect();
     if config.video_bitrate == bitrate {
@@ -1110,6 +1174,15 @@ pub fn normalize_video_config(
     } else if config.video_codec != "libx265" {
         config.x265_multipass_opt_analysis = false;
         config.x265_multipass_opt_distortion = false;
+    }
+    // psy 只属于 x264/x265：编码器切走即清，不留看不见的状态。
+    if config.video_codec != "libx264" {
+        config.x264_disable_psy = false;
+        config.x264_psy_rd.clear();
+    }
+    if config.video_codec != "libx265" {
+        config.x265_psy_rd.clear();
+        config.x265_psy_rdoq.clear();
     }
     if !is_videotoolbox_video_codec(&config.video_codec) {
         config.videotoolbox_allow_sw = false;

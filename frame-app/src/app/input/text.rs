@@ -4,6 +4,21 @@ pub(super) fn sanitize_number_input(value: &str) -> String {
     value.chars().filter(char::is_ascii_digit).collect()
 }
 
+/// 小数输入清洗：保留数字与第一个小数点（psy 参数是浮点值）。
+pub(super) fn sanitize_decimal_input(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut dot_seen = false;
+    for ch in value.chars() {
+        if ch.is_ascii_digit() {
+            out.push(ch);
+        } else if ch == '.' && !dot_seen {
+            dot_seen = true;
+            out.push(ch);
+        }
+    }
+    out
+}
+
 pub(super) fn sanitize_replacement_text(kind: FrameTextInputKind, value: &str) -> String {
     match kind {
         FrameTextInputKind::MaxConcurrency
@@ -14,6 +29,9 @@ pub(super) fn sanitize_replacement_text(kind: FrameTextInputKind, value: &str) -
         | FrameTextInputKind::VideoMaxrate
         | FrameTextInputKind::VideoBufsize
         | FrameTextInputKind::GifLoop => sanitize_number_input(value),
+        FrameTextInputKind::VideoX264PsyRd
+        | FrameTextInputKind::VideoX265PsyRd
+        | FrameTextInputKind::VideoX265PsyRdoq => sanitize_decimal_input(value),
         FrameTextInputKind::PreviewStartTime | FrameTextInputKind::PreviewEndTime => {
             sanitize_number_input(value)
         }

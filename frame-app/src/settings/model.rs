@@ -681,6 +681,10 @@ pub struct ConversionConfig {
     pub video_two_pass: bool,
     pub x265_multipass_opt_analysis: bool,
     pub x265_multipass_opt_distortion: bool,
+    pub x264_disable_psy: bool,
+    pub x264_psy_rd: String,
+    pub x265_psy_rd: String,
+    pub x265_psy_rdoq: String,
     pub videotoolbox_allow_sw: bool,
     pub hw_decode: bool,
 }
@@ -749,6 +753,10 @@ impl Default for ConversionConfig {
             nvenc_multipass: "disabled".to_string(),
             x265_multipass_opt_analysis: false,
             x265_multipass_opt_distortion: false,
+            x264_disable_psy: false,
+            x264_psy_rd: String::new(),
+            x265_psy_rd: String::new(),
+            x265_psy_rdoq: String::new(),
             videotoolbox_allow_sw: false,
             hw_decode: false,
         }

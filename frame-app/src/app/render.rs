@@ -197,6 +197,12 @@ impl Render for FrameRoot {
                     self.ensure_text_input_focus(FrameTextInputKind::VideoMaxrate, cx);
                 let video_bufsize_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::VideoBufsize, cx);
+                let video_x264_psy_rd_focus =
+                    self.ensure_text_input_focus(FrameTextInputKind::VideoX264PsyRd, cx);
+                let video_x265_psy_rd_focus =
+                    self.ensure_text_input_focus(FrameTextInputKind::VideoX265PsyRd, cx);
+                let video_x265_psy_rdoq_focus =
+                    self.ensure_text_input_focus(FrameTextInputKind::VideoX265PsyRdoq, cx);
                 let gif_loop_focus = self.ensure_text_input_focus(FrameTextInputKind::GifLoop, cx);
                 let video_selects_enabled =
                     self.settings_ui.active_tab == SettingsTab::Video
@@ -555,6 +561,9 @@ impl Render for FrameRoot {
                     video_bitrate_focus: Some(&video_bitrate_focus),
                     video_maxrate_focus: Some(&video_maxrate_focus),
                     video_bufsize_focus: Some(&video_bufsize_focus),
+                    video_x264_psy_rd_focus: Some(&video_x264_psy_rd_focus),
+                    video_x265_psy_rd_focus: Some(&video_x265_psy_rd_focus),
+                    video_x265_psy_rdoq_focus: Some(&video_x265_psy_rdoq_focus),
                     gif_loop_focus: Some(&gif_loop_focus),
                     video_pixel_format_select: SettingsVideoSelectUi {
                         popover: self.settings_ui.video_pixel_format_select_popover,

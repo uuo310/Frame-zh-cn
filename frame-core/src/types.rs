@@ -383,6 +383,21 @@ pub struct ConversionConfig {
     /// 仅 libx265 + 两遍编码 + 目标码率档生效。默认关闭。
     #[serde(default)]
     pub x265_multipass_opt_distortion: bool,
+    /// x264 心理视觉总开关关闭（`psy=0`）。默认 false＝不干预（编码器默认开启）。
+    /// 实测 psy=0 的产物与 psy-rd=0:psy-trellis=0 互异——总开关有独立效果，
+    /// 是彻底关闭心理视觉的唯一途径；开启后 psy-rd 被抑制（冲突裁决）。
+    #[serde(default)]
+    pub x264_disable_psy: bool,
+    /// x264 心理视觉强度（`psy-rd`）。空串＝不发，跟随编码器默认（1.0）。范围 0..=10。
+    #[serde(default)]
+    pub x264_psy_rd: String,
+    /// x265 心理视觉强度（`psy-rd`）。空串＝不发，跟随编码器默认（2.0）。范围 0..=5。
+    #[serde(default)]
+    pub x265_psy_rd: String,
+    /// x265 畸变精炼（`psy-rdoq`）。空串＝不发；非空且 >0 时自动携带 `rdoq-level=2`。
+    /// 范围 0..=60。默认 0 ＝编码器默认（medium 档 rdoq 关闭，该参数无效）。
+    #[serde(default)]
+    pub x265_psy_rdoq: String,
     /// NVENC 预看帧数（`-rc-lookahead`）。0 表示不发该参数，即跟随默认关闭。
     #[serde(default)]
     pub nvenc_rc_lookahead: u32,

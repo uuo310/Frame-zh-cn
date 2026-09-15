@@ -260,6 +260,19 @@ pub(in crate::app) fn settings_video_tab(
             window,
             cx,
         ))
+        .when(
+            config.video_codec == "libx264" || config.video_codec == "libx265",
+            |this| {
+                this.child(settings_video_psy_section(
+                    config,
+                    settings_disabled,
+                    focuses,
+                    palette,
+                    window,
+                    cx,
+                ))
+            },
+        )
         .when(is_nvenc_video_codec(&config.video_codec), |this| {
             this.child(settings_video_nvenc_section(
                 config,
@@ -719,6 +732,101 @@ fn settings_video_quality_section(
         section = section.child(bitrate);
     }
 
+    section
+}
+
+/// 心理视觉优化（策略型 UI：只暴露 psy-rd 与 x264 总开关，其余跟随编码器默认）。
+/// psy 与率控正交，恒定质量/目标码率档都生效。
+fn settings_video_psy_section(
+    config: &ConversionConfig,
+    settings_disabled: bool,
+    focuses: SettingsVideoInputFocuses<'_>,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let mut section = settings_section("心理视觉优化", palette);
+    match config.video_codec.as_str() {
+        "libx264" => {
+            section = section
+                .child(settings_video_checkbox_row(
+                    "video-x264-psy",
+                    "心理视觉优化",
+                    "默认跟随编码器开启；取消勾选＝发 psy=0，客观指标优先",
+                    !config.x264_disable_psy,
+                    settings_disabled,
+                    palette,
+                    cx,
+                    move |root, _event, _window, cx| {
+                        if settings_disabled {
+                            return;
+                        }
+                        if root.update_selected_config(|config| {
+                            apply_x264_disable_psy(config, !config.x264_disable_psy)
+                        }) {
+                            cx.notify();
+                        }
+                    },
+                ))
+                .when(!config.x264_disable_psy, |this| {
+                    this.child(settings_field_label(
+                        "心理视觉强度 psy-rd（0–10，空 = 跟随默认 1.0）",
+                        palette,
+                    ))
+                    .child(frame_text_input(
+                        FrameTextInputSpec {
+                            id: "settings-video-x264-psy-rd-field",
+                            value: &config.x264_psy_rd,
+                            placeholder: "1.0",
+                            disabled: settings_disabled,
+                            focus: focuses.x264_psy_rd,
+                            kind: FrameTextInputKind::VideoX264PsyRd,
+                        },
+                        palette,
+                        window,
+                        cx,
+                    ))
+                });
+        }
+        "libx265" => {
+            section = section
+                .child(settings_field_label(
+                    "心理视觉强度 psy-rd（0–5，空 = 跟随默认 2.0）",
+                    palette,
+                ))
+                .child(frame_text_input(
+                    FrameTextInputSpec {
+                        id: "settings-video-x265-psy-rd-field",
+                        value: &config.x265_psy_rd,
+                        placeholder: "2.0",
+                        disabled: settings_disabled,
+                        focus: focuses.x265_psy_rd,
+                        kind: FrameTextInputKind::VideoX265PsyRd,
+                    },
+                    palette,
+                    window,
+                    cx,
+                ))
+                .child(settings_field_label(
+                    "畸变精炼 psy-rdoq（0–60，空 = 跟随默认 0）",
+                    palette,
+                ))
+                .child(frame_text_input(
+                    FrameTextInputSpec {
+                        id: "settings-video-x265-psy-rdoq-field",
+                        value: &config.x265_psy_rdoq,
+                        placeholder: "0",
+                        disabled: settings_disabled,
+                        focus: focuses.x265_psy_rdoq,
+                        kind: FrameTextInputKind::VideoX265PsyRdoq,
+                    },
+                    palette,
+                    window,
+                    cx,
+                ));
+        }
+        _ => {}
+    }
     section
 }
 
