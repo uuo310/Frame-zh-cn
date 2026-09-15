@@ -261,6 +261,27 @@ pub(in crate::app) fn settings_video_tab(
             cx,
         ))
         .when(
+            config.video_codec == "libx264" || config.video_codec == "h264_nvenc",
+            |this| {
+                this.child(settings_video_profile_block(
+                    config,
+                    settings_disabled,
+                    palette,
+                    window,
+                    cx,
+                ))
+            },
+        )
+        .when(config.video_codec == "prores", |this| {
+            this.child(settings_video_prores_profile_block(
+                config,
+                settings_disabled,
+                palette,
+                window,
+                cx,
+            ))
+        })
+        .when(
             config.video_codec == "libx264" || config.video_codec == "libx265",
             |this| {
                 this.child(settings_video_psy_section(
@@ -828,6 +849,118 @@ fn settings_video_psy_section(
         _ => {}
     }
     section
+}
+
+/// 编码兼容性（H.264 软件 / NVIDIA）：兼容性取向，默认跟随编码器。
+fn settings_video_profile_block(
+    config: &ConversionConfig,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let codec = config.video_codec.clone();
+    let selected = if codec == "h264_nvenc" {
+        config.nvenc_h264_profile.clone()
+    } else {
+        config.x264_profile.clone()
+    };
+    let mut grid = div().grid().grid_cols(4).gap_2();
+    for (value, label) in [
+        ("", "跟随默认"),
+        ("baseline", "Baseline"),
+        ("main", "Main"),
+        ("high", "High"),
+    ] {
+        let value = value.to_string();
+        let codec = codec.clone();
+        grid = grid.child(
+            frame_choice_button(
+                format!(
+                    "video-h264-profile-{}",
+                    if value.is_empty() { "auto" } else { &value }
+                ),
+                label,
+                selected == value,
+                !disabled,
+                palette,
+                window,
+                cx,
+            )
+            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if disabled {
+                    return;
+                }
+                let changed = root.update_selected_config(|config| match codec.as_str() {
+                    "h264_nvenc" => apply_nvenc_h264_profile(config, &value),
+                    _ => apply_x264_profile(config, &value),
+                });
+                if changed {
+                    cx.notify();
+                }
+            })),
+        );
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(settings_field_label("编码兼容性", palette))
+        .child(grid)
+}
+
+/// ProRes 档位（官方档位体系；ProRes 走 prores_ks 编码器）。
+fn settings_video_prores_profile_block(
+    config: &ConversionConfig,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let mut grid = div().grid().grid_cols(4).gap_2();
+    for (value, label) in [
+        ("", "跟随默认"),
+        ("proxy", "Proxy"),
+        ("lt", "LT"),
+        ("standard", "标准"),
+        ("hq", "HQ"),
+        ("4444", "4444"),
+        ("4444xq", "4444 XQ"),
+    ] {
+        let value = value.to_string();
+        grid = grid.child(
+            frame_choice_button(
+                format!(
+                    "video-prores-profile-{}",
+                    if value.is_empty() { "auto" } else { &value }
+                ),
+                label,
+                config.prores_profile == value,
+                !disabled,
+                palette,
+                window,
+                cx,
+            )
+            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                if disabled {
+                    return;
+                }
+                if root
+                    .update_selected_config(|config| apply_prores_profile(config, &value))
+                {
+                    cx.notify();
+                }
+            })),
+        );
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(settings_field_label("ProRes 档位", palette))
+        .child(grid)
 }
 
 fn settings_video_bitrate_mode_grid(

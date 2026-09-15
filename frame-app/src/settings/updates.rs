@@ -538,7 +538,9 @@ pub fn apply_pixel_format(config: &mut ConversionConfig, pixel_format: &str) -> 
         return false;
     }
 
-    config.pixel_format = pixel_format;
+    config.pixel_format = pixel_format.clone();
+    // 像素格式是更基础的结构属性：与它冲突的 profile / 档位一并回落（见函数注释）。
+    reconcile_profile_with_pixel_format(config, &pixel_format);
     true
 }
 
@@ -686,6 +688,94 @@ pub fn apply_x265_psy_rdoq(config: &mut ConversionConfig, value: &str) -> bool {
 
     config.x265_psy_rdoq = next;
     true
+}
+
+/// 编码兼容性 / ProRes 档位的合法取值（空串＝跟随默认）。
+const X264_PROFILE_VALUES: [&str; 4] = ["", "baseline", "main", "high"];
+const PRORES_PROFILE_VALUES: [&str; 7] = ["", "proxy", "lt", "standard", "hq", "4444", "4444xq"];
+
+fn apply_profile_value(
+    config: &mut ConversionConfig,
+    value: &str,
+    codec: &str,
+    allowed: &[&str],
+) -> Option<String> {
+    let value = value.to_ascii_lowercase();
+    if !allowed.contains(&value.as_str()) {
+        return None;
+    }
+    (config.video_codec == codec).then_some(value)
+}
+
+/// H.264 软件编码兼容性 profile：空＝跟随默认（x264 自动 high）。
+///
+/// 8-bit 档位与 10-bit 像素格式**互斥**（实测 x264 `-profile high` × `yuv420p10le`
+/// 直接硬报错）⇒ 10-bit 像素格式下拒设（此时输出会自动落到 High 10 档案）。
+pub fn apply_x264_profile(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = apply_profile_value(config, value, "libx264", &X264_PROFILE_VALUES) else {
+        return false;
+    };
+    if !next.is_empty() && frame_core::profile::is_ten_bit_pixel_format(&config.pixel_format) {
+        return false;
+    }
+    if config.x264_profile == next {
+        return false;
+    }
+
+    config.x264_profile = next;
+    true
+}
+
+/// H.264 NVIDIA 编码兼容性 profile：空＝跟随默认（NVENC 默认 main）。
+pub fn apply_nvenc_h264_profile(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = apply_profile_value(config, value, "h264_nvenc", &X264_PROFILE_VALUES) else {
+        return false;
+    };
+    if config.nvenc_h264_profile == next {
+        return false;
+    }
+
+    config.nvenc_h264_profile = next;
+    true
+}
+
+/// ProRes 档位：空＝跟随默认（prores_ks auto）。
+///
+/// 4444／4444XQ 需要 4:4:4 像素格式——实测 4:2:0 下 `rc=0 但产出坏流`
+/// （标签 4444、数据 yuv422p12le）⇒ 选这两个档位时**自动配套**把像素格式切到
+/// `yuv444p10le`；容器不允许该像素格式时拒设（避免坏文件）。
+pub fn apply_prores_profile(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = apply_profile_value(config, value, "prores", &PRORES_PROFILE_VALUES) else {
+        return false;
+    };
+    let mut pixel_format_changed = false;
+    if frame_core::profile::is_prores_4444_tier(&next)
+        && !frame_core::profile::is_four_four_four_pixel_format(&config.pixel_format)
+    {
+        if !is_video_pixel_format_allowed_for_container(&config.container, "prores", "yuv444p10le")
+        {
+            return false;
+        }
+        config.pixel_format = "yuv444p10le".to_string();
+        pixel_format_changed = true;
+    }
+    let profile_changed = config.prores_profile != next;
+    config.prores_profile = next;
+    profile_changed || pixel_format_changed
+}
+
+/// 档位与像素格式双向联动：切到不兼容的像素格式时回落档位。
+fn reconcile_profile_with_pixel_format(config: &mut ConversionConfig, pixel_format: &str) {
+    if config.video_codec == "libx264" && frame_core::profile::is_ten_bit_pixel_format(pixel_format)
+    {
+        config.x264_profile.clear();
+    }
+    if config.video_codec == "prores"
+        && frame_core::profile::is_prores_4444_tier(&config.prores_profile)
+        && !frame_core::profile::is_four_four_four_pixel_format(pixel_format)
+    {
+        config.prores_profile.clear();
+    }
 }
 
 pub fn apply_video_bitrate(config: &mut ConversionConfig, bitrate: &str) -> bool {
@@ -1184,6 +1274,18 @@ pub fn normalize_video_config(
         config.x265_psy_rd.clear();
         config.x265_psy_rdoq.clear();
     }
+    // 编码兼容性 / ProRes 档位同理：切走即清；与像素格式冲突时也回落。
+    if config.video_codec != "libx264" {
+        config.x264_profile.clear();
+    }
+    if config.video_codec != "h264_nvenc" {
+        config.nvenc_h264_profile.clear();
+    }
+    if config.video_codec != "prores" {
+        config.prores_profile.clear();
+    }
+    let current_pixel_format = config.pixel_format.clone();
+    reconcile_profile_with_pixel_format(config, &current_pixel_format);
     if !is_videotoolbox_video_codec(&config.video_codec) {
         config.videotoolbox_allow_sw = false;
     }

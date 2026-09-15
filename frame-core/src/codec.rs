@@ -1,3 +1,4 @@
+use crate::profile;
 use crate::types::ConversionConfig;
 use crate::utils::{
     is_nvenc_codec, is_svt_av1_codec, is_videotoolbox_codec, map_nvenc_preset, map_svt_av1_preset,
@@ -14,7 +15,10 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
     let is_videotoolbox = is_videotoolbox_codec(&config.video_codec);
 
     args.push("-c:v".to_string());
-    args.push(config.video_codec.clone());
+    // ProRes 走 prores_ks（generic `prores` 无档位选项，质量控件是死旋钮）。
+    args.push(profile::encoder_name(&config.video_codec).to_string());
+    // 编码兼容性 profile / ProRes 档位：空串＝跟随默认，不发参数。
+    profile::add_profile_args(args, config);
 
     if config.video_codec == "mpeg2video" {
         args.push("-b:v".to_string());

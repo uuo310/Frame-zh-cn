@@ -193,6 +193,9 @@ fn core_config_from_gpui_preserves_active_conversion_fields() {
         x264_psy_rd: String::new(),
         x265_psy_rd: String::new(),
         x265_psy_rdoq: String::new(),
+        x264_profile: String::new(),
+        nvenc_h264_profile: String::new(),
+        prores_profile: String::new(),
         videotoolbox_allow_sw: false,
         hw_decode: false,
     };

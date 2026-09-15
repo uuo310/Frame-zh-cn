@@ -2393,3 +2393,67 @@ mod psy {
         assert_eq!(x264.x264_psy_rd, "");
     }
 }
+
+mod profile {
+    use super::*;
+
+    fn config(codec: &str, container: &str) -> ConversionConfig {
+        ConversionConfig {
+            video_codec: codec.to_string(),
+            container: container.to_string(),
+            ..ConversionConfig::default()
+        }
+    }
+
+    #[test]
+    fn profile_values_are_gated_and_normalized() {
+        let mut x264 = config("libx264", "mp4");
+        assert!(apply_x264_profile(&mut x264, "High"), "大小写归一化后接受");
+        assert_eq!(x264.x264_profile, "high");
+        assert!(!apply_x264_profile(&mut x264, "high10"), "10-bit 档位不提供");
+        assert!(apply_x264_profile(&mut x264, ""), "空串＝回落跟随默认");
+
+        let mut nvenc = config("h264_nvenc", "mp4");
+        assert!(!apply_x264_profile(&mut nvenc, "high"), "x264 档位只在 libx264 下可改");
+        assert!(apply_nvenc_h264_profile(&mut nvenc, "high"));
+        assert_eq!(nvenc.nvenc_h264_profile, "high");
+
+        let mut prores = config("prores", "mov");
+        assert!(apply_prores_profile(&mut prores, "hq"));
+        assert_eq!(prores.prores_profile, "hq");
+        assert!(!apply_prores_profile(&mut prores, "xq"), "别名不接受");
+    }
+
+    #[test]
+    fn x264_profile_and_ten_bit_pixel_format_are_mutually_exclusive() {
+        let mut config = config("libx264", "mp4");
+        assert!(apply_x264_profile(&mut config, "high"));
+        assert!(apply_pixel_format(&mut config, "yuv420p10le"));
+        assert_eq!(config.x264_profile, "", "10-bit 与 8-bit 档位互斥，自动回落");
+        assert!(
+            !apply_x264_profile(&mut config, "high"),
+            "10-bit 像素格式下拒设 8-bit 档位（实测 x264 会硬报错）"
+        );
+    }
+
+    #[test]
+    fn prores_4444_tier_couples_with_four_four_four_pixel_format() {
+        let mut config = config("prores", "mov");
+        assert!(apply_prores_profile(&mut config, "4444"));
+        assert_eq!(config.pixel_format, "yuv444p10le", "4444 自动配套 4:4:4");
+
+        // prores 只允许 422p10le / 444p10le（media-rules）：切到 422 时档位回落
+        assert!(apply_pixel_format(&mut config, "yuv422p10le"));
+        assert_eq!(config.prores_profile, "", "离开 4:4:4 后档位回落");
+    }
+
+    #[test]
+    fn switching_codec_clears_the_profile_fields() {
+        let mut moved = config("libx264", "mp4");
+        moved.x264_profile = "baseline".to_string();
+        moved.nvenc_h264_profile = "high".to_string();
+        assert!(apply_video_codec(&mut moved, "libx265"));
+        assert_eq!(moved.x264_profile, "");
+        assert_eq!(moved.nvenc_h264_profile, "");
+    }
+}

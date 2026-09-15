@@ -398,6 +398,17 @@ pub struct ConversionConfig {
     /// 范围 0..=60。默认 0 ＝编码器默认（medium 档 rdoq 关闭，该参数无效）。
     #[serde(default)]
     pub x265_psy_rdoq: String,
+    /// H.264 软件编码兼容性 profile：`baseline`／`main`／`high`。空串＝跟随默认
+    /// （x264 自动选 high）。10-bit 档案不暴露（像素格式自动决定）。
+    #[serde(default)]
+    pub x264_profile: String,
+    /// H.264 NVIDIA 编码兼容性 profile：同上三档。空串＝跟随默认（NVENC 默认 main）。
+    #[serde(default)]
+    pub nvenc_h264_profile: String,
+    /// ProRes 档位：`proxy`／`lt`／`standard`／`hq`／`4444`／`4444xq`。空串＝跟随
+    /// 默认（prores_ks auto）。仅 prores 生效；ProRes 走 `prores_ks` 编码器。
+    #[serde(default)]
+    pub prores_profile: String,
     /// NVENC 预看帧数（`-rc-lookahead`）。0 表示不发该参数，即跟随默认关闭。
     #[serde(default)]
     pub nvenc_rc_lookahead: u32,

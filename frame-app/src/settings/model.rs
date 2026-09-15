@@ -685,6 +685,9 @@ pub struct ConversionConfig {
     pub x264_psy_rd: String,
     pub x265_psy_rd: String,
     pub x265_psy_rdoq: String,
+    pub x264_profile: String,
+    pub nvenc_h264_profile: String,
+    pub prores_profile: String,
     pub videotoolbox_allow_sw: bool,
     pub hw_decode: bool,
 }
@@ -757,6 +760,9 @@ impl Default for ConversionConfig {
             x264_psy_rd: String::new(),
             x265_psy_rd: String::new(),
             x265_psy_rdoq: String::new(),
+            x264_profile: String::new(),
+            nvenc_h264_profile: String::new(),
+            prores_profile: String::new(),
             videotoolbox_allow_sw: false,
             hw_decode: false,
         }
