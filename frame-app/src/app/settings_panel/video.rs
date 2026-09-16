@@ -301,20 +301,21 @@ pub(in crate::app) fn settings_video_tab(
                 ))
             },
         )
+        .when(is_videotoolbox_video_codec(&config.video_codec), |this| {
+            this.child(settings_video_videotoolbox_section(
+                config,
+                settings_disabled,
+                palette,
+                cx,
+            ))
+        })
+        // NVENC 选项与硬件加速/解码置为下区末尾两节（此序）。
         .when(is_nvenc_video_codec(&config.video_codec), |this| {
             this.child(settings_video_nvenc_section(
                 config,
                 settings_disabled,
                 palette,
                 window,
-                cx,
-            ))
-        })
-        .when(is_videotoolbox_video_codec(&config.video_codec), |this| {
-            this.child(settings_video_videotoolbox_section(
-                config,
-                settings_disabled,
-                palette,
                 cx,
             ))
         })
@@ -849,7 +850,7 @@ fn settings_video_psy_section(
                     cx,
                 ))
                 .child(settings_field_label(
-                    "畸变精炼 psy-rdoq（0–60，空 = 跟随默认 0）",
+                    "心理视觉量化 psy-rdoq（0–60，空 = 跟随默认 0）",
                     palette,
                 ))
                 .child(frame_text_input(
@@ -1229,44 +1230,51 @@ fn settings_video_nvenc_section(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     settings_section("NVENC 选项", palette)
-        .child(settings_video_checkbox_row(
-            "video-nvenc-spatial-aq",
-            "空间 AQ",
-            "提升高复杂度场景的细节",
-            config.nvenc_spatial_aq,
-            disabled,
-            palette,
-            cx,
-            move |root, _event, _window, cx| {
-                if disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| {
-                    apply_nvenc_spatial_aq(config, !config.nvenc_spatial_aq)
-                }) {
-                    cx.notify();
-                }
+        // 空间/时间 AQ 仅 H.264/HEVC NVENC 支持；av1_nvenc 不暴露 -spatial_aq/-temporal_aq
+        // （程序自带 ffmpeg 8.1.2-50 实测），故 av1 不显示这两项；预看帧数/多遍分析仍照给。
+        .when(
+            matches!(config.video_codec.as_str(), "h264_nvenc" | "hevc_nvenc"),
+            |this| {
+                this.child(settings_video_checkbox_row(
+                    "video-nvenc-spatial-aq",
+                    "空间 AQ",
+                    "提升高复杂度场景的细节",
+                    config.nvenc_spatial_aq,
+                    disabled,
+                    palette,
+                    cx,
+                    move |root, _event, _window, cx| {
+                        if disabled {
+                            return;
+                        }
+                        if root.update_selected_config(|config| {
+                            apply_nvenc_spatial_aq(config, !config.nvenc_spatial_aq)
+                        }) {
+                            cx.notify();
+                        }
+                    },
+                ))
+                .child(settings_video_checkbox_row(
+                    "video-nvenc-temporal-aq",
+                    "时间 AQ",
+                    "稳定帧间质量",
+                    config.nvenc_temporal_aq,
+                    disabled,
+                    palette,
+                    cx,
+                    move |root, _event, _window, cx| {
+                        if disabled {
+                            return;
+                        }
+                        if root.update_selected_config(|config| {
+                            apply_nvenc_temporal_aq(config, !config.nvenc_temporal_aq)
+                        }) {
+                            cx.notify();
+                        }
+                    },
+                ))
             },
-        ))
-        .child(settings_video_checkbox_row(
-            "video-nvenc-temporal-aq",
-            "时间 AQ",
-            "稳定帧间质量",
-            config.nvenc_temporal_aq,
-            disabled,
-            palette,
-            cx,
-            move |root, _event, _window, cx| {
-                if disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| {
-                    apply_nvenc_temporal_aq(config, !config.nvenc_temporal_aq)
-                }) {
-                    cx.notify();
-                }
-            },
-        ))
+        )
         .child(
             div()
                 .flex()

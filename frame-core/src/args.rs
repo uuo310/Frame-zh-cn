@@ -1887,6 +1887,35 @@ mod tests {
     }
 
     #[test]
+    fn nvenc_spatial_and_temporal_aq_stay_out_of_av1() {
+        // av1_nvenc 不认 -spatial_aq/-temporal_aq（程序自带 ffmpeg 8.1.2-50 实测）：
+        // 即便配置里残留 true，也不得对 av1 发出，避免生成非法命令行。
+        let mut av1 = sample_config("mp4", "av1_nvenc");
+        av1.nvenc_spatial_aq = true;
+        av1.nvenc_temporal_aq = true;
+        let mut args = Vec::new();
+        crate::codec::add_video_codec_args(&mut args, &av1);
+        assert!(
+            !args.iter().any(|arg| arg == "-spatial_aq"),
+            "av1_nvenc 不应收到 -spatial_aq：{args:?}"
+        );
+        assert!(
+            !args.iter().any(|arg| arg == "-temporal_aq"),
+            "av1_nvenc 不应收到 -temporal_aq：{args:?}"
+        );
+
+        // 对照：h264_nvenc 勾选时照常发，确保门控没误伤。
+        let mut h264 = sample_config("mp4", "h264_nvenc");
+        h264.nvenc_spatial_aq = true;
+        let mut h264_args = Vec::new();
+        crate::codec::add_video_codec_args(&mut h264_args, &h264);
+        assert!(
+            args_contains_pair(&h264_args, "-spatial_aq", "1"),
+            "h264_nvenc 勾选应发 -spatial_aq：{h264_args:?}"
+        );
+    }
+
+    #[test]
     fn nvenc_multipass_sends_only_the_multipass_option() {
         let mut config = sample_config("mp4", "h264_nvenc");
         config.video_bitrate_mode = "bitrate".to_string();

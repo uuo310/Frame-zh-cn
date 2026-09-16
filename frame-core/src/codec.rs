@@ -87,11 +87,15 @@ pub fn add_video_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
     }
 
     if is_nvenc {
-        if config.nvenc_spatial_aq {
+        // 空间/时间 AQ 仅 H.264/HEVC NVENC 支持；av1_nvenc 不认 -spatial_aq/-temporal_aq
+        // （程序自带 ffmpeg 8.1.2-50 实测）。UI 已对 av1 隐藏该勾选，这里再防御性不发，
+        // 避免旧配置里残留 true 时切到 av1 生成非法命令行。
+        let aq_supported = config.video_codec != "av1_nvenc";
+        if aq_supported && config.nvenc_spatial_aq {
             args.push("-spatial_aq".to_string());
             args.push("1".to_string());
         }
-        if config.nvenc_temporal_aq {
+        if aq_supported && config.nvenc_temporal_aq {
             args.push("-temporal_aq".to_string());
             args.push("1".to_string());
         }

@@ -94,7 +94,7 @@ impl FrameTextInputKind {
             Self::VideoBufsize => "视频 VBV 缓冲大小",
             Self::VideoX264PsyRd => "H.264 心理视觉强度",
             Self::VideoX265PsyRd => "H.265 心理视觉强度",
-            Self::VideoX265PsyRdoq => "H.265 畸变精炼",
+            Self::VideoX265PsyRdoq => "H.265 心理视觉量化",
             Self::GifLoop => "GIF 循环次数",
             Self::PreviewStartTime => "预览开始时间",
             Self::PreviewEndTime => "预览结束时间",
