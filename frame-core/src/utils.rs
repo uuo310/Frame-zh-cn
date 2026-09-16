@@ -53,6 +53,22 @@ pub fn is_nvenc_codec(codec: &str) -> bool {
     matches!(codec, "h264_nvenc" | "hevc_nvenc" | "av1_nvenc")
 }
 
+/// HEVC 系编码器。容器层要单独识别它们：MP4/MOV 输出需补 `hvc1` sample entry
+/// （ffmpeg 默认写 `hev1`，Apple 的 AVFoundation 拒播）。取值来自 `media-rules.json`
+/// 的容器兼容表，上游 Frame 只支持这三个。
+#[must_use]
+pub fn is_hevc_codec(codec: &str) -> bool {
+    matches!(codec, "libx265" | "hevc_nvenc" | "hevc_videotoolbox")
+}
+
+/// 探针给出的源视频编码名（ffprobe 的 `codec_name`）是否为 HEVC。
+///
+/// copy 模式不经过编码器选择，判断源编码族只能靠探针。
+#[must_use]
+pub fn is_hevc_probe_codec(codec: Option<&str>) -> bool {
+    codec.is_some_and(|value| value.eq_ignore_ascii_case("hevc"))
+}
+
 #[must_use]
 pub fn is_svt_av1_codec(codec: &str) -> bool {
     codec == "libsvtav1"
@@ -169,5 +185,32 @@ mod tests {
     #[test]
     fn map_svt_av1_preset_falls_back_to_medium_speed() {
         assert_eq!(map_svt_av1_preset("unknown"), "8");
+    }
+
+    #[test]
+    fn hevc_codecs_are_gated_to_the_three_supported_encoders() {
+        for codec in ["libx265", "hevc_nvenc", "hevc_videotoolbox"] {
+            assert!(is_hevc_codec(codec), "{codec} 是 HEVC 系");
+        }
+        for codec in [
+            "libx264",
+            "h264_nvenc",
+            "libsvtav1",
+            "av1_nvenc",
+            "vp9",
+            "prores",
+            "",
+        ] {
+            assert!(!is_hevc_codec(codec), "{codec} 不是 HEVC 系");
+        }
+    }
+
+    #[test]
+    fn probe_codec_name_identifies_hevc_case_insensitively() {
+        assert!(is_hevc_probe_codec(Some("hevc")));
+        assert!(is_hevc_probe_codec(Some("HEVC")));
+        assert!(!is_hevc_probe_codec(Some("h264")));
+        assert!(!is_hevc_probe_codec(Some("libx265")), "探针给的是解码侧名");
+        assert!(!is_hevc_probe_codec(None), "无探针结果不发标签");
     }
 }

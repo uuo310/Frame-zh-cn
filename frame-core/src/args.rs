@@ -5,7 +5,8 @@ use crate::codec::{
     subtitle_output_codec,
 };
 use crate::container::{
-    TransportStreamProfile, is_transport_stream_container, transport_stream_profile,
+    TransportStreamProfile, is_iso_bmff_container, is_transport_stream_container,
+    transport_stream_profile,
 };
 use crate::error::ConversionError;
 use crate::filters::{
@@ -25,7 +26,7 @@ use crate::types::{
     AudioTrack, ConversionConfig, ExternalSubtitleTrack, HwDecodeBackend, MetadataConfig,
     MetadataMode, ProbeMetadata, SubtitleTrack, VOLUME_EPSILON,
 };
-use crate::utils::{is_audio_only_container, parse_time};
+use crate::utils::{is_audio_only_container, is_hevc_codec, is_hevc_probe_codec, parse_time};
 
 fn is_copy_mode(config: &ConversionConfig) -> bool {
     config.processing_mode == "copy"
@@ -611,6 +612,11 @@ pub fn build_ffmpeg_args_with_hwaccel(
         }
         args.push("-dn".to_string());
         add_container_output_args(&mut args, &config.container);
+        add_hevc_container_tag(
+            &mut args,
+            is_hevc_probe_codec(probe.video_codec.as_deref()),
+            &config.container,
+        );
         args.push("-n".to_string());
         args.push(output.to_string());
         return Ok(args);
@@ -782,20 +788,53 @@ pub fn build_ffmpeg_args_with_hwaccel(
 
     args.push("-dn".to_string());
     add_container_output_args(&mut args, &config.container);
+    add_hevc_container_tag(
+        &mut args,
+        is_hevc_codec(&config.video_codec),
+        &config.container,
+    );
     args.push("-n".to_string());
     args.push(output.to_string());
 
     Ok(args)
 }
 
-fn add_container_output_args(args: &mut Vec<String>, container: &str) {
-    let Some(profile) = transport_stream_profile(container) else {
+/// HEVC 进 MP4/MOV 时补 `-tag:v hvc1`。
+///
+/// ffmpeg 的 mp4 muxer 默认写 `hev1`（参数集允许留在带内），而 Apple 官方
+/// 《HLS Authoring Specification》1.10 要求使用 `hvc1`，并把 `hev1` 明确标注为
+/// "Use not recommended"；非 Apple 播放器（VLC / mpv / Chrome）两者都收
+/// ⇒ 补标签只有收益没有代价。
+///
+/// **两种模式都补**：容器级元数据按**目标容器**的规范生成，与码流来自哪里无关
+/// —— ffmpeg 官方文档把 streamcopy 的用途明确定义为包含
+/// "changing the … container format, or modifying container-level metadata"。
+/// 实测同一码流两份产物抽出裸流 md5 逐字节相同、文件字节数相同
+/// ⇒ 不动码流、不改体积、不改耗时。
+///
+/// 判据由调用方给：重编码看所选编码器，copy 看探针给出的源编码族。
+fn add_hevc_container_tag(args: &mut Vec<String>, is_hevc: bool, container: &str) {
+    if !is_hevc || !is_iso_bmff_container(container) {
         return;
-    };
-    args.push("-f".to_string());
-    args.push("mpegts".to_string());
-    args.push("-mpegts_m2ts_mode".to_string());
-    args.push(profile.ffmpeg_m2ts_mode().to_string());
+    }
+    args.extend(["-tag:v".to_string(), "hvc1".to_string()]);
+}
+
+fn add_container_output_args(args: &mut Vec<String>, container: &str) {
+    if let Some(profile) = transport_stream_profile(container) {
+        args.push("-f".to_string());
+        args.push("mpegts".to_string());
+        args.push("-mpegts_m2ts_mode".to_string());
+        args.push(profile.ffmpeg_m2ts_mode().to_string());
+    }
+    // ISO BMFF（MP4/MOV）：moov 默认写在文件尾，流式播放必须先取到尾部索引才能起播；
+    // `+faststart` 把它前置。ffmpeg 重封装**不保留源的布局**（实测：源 moov 在 0.2% 处，
+    // 不加此标志处理后落到 80.7% 处——源已有的 faststart 会丢），而 MP4Box 等专业 remux
+    // 工具默认就前置 ⇒ 属「按目标容器规范生成」，无条件加。
+    // 实测代价为零：抽出裸流 md5 相同、文件字节数相同（纯 box 重排，不动码流）。
+    if is_iso_bmff_container(container) {
+        args.extend(["-movflags".to_string(), "+faststart".to_string()]);
+    }
 }
 
 fn add_container_metadata_flags(
@@ -1956,6 +1995,104 @@ mod tests {
             !args.iter().any(|arg| arg == "-pass"),
             "未勾选时不应声明两遍：{args:?}"
         );
+    }
+
+    #[test]
+    fn hevc_outputs_into_iso_bmff_containers_carry_the_hvc1_sample_entry_tag() {
+        for container in ["mp4", "mov"] {
+            for codec in ["libx265", "hevc_nvenc", "hevc_videotoolbox"] {
+                let config = sample_config(container, codec);
+                let args = build_ffmpeg_args("in.mkv", "out", &config, &sample_probe()).unwrap();
+                assert!(
+                    args_contains_pair(&args, "-tag:v", "hvc1"),
+                    "{codec} 进 {container} 应补 hvc1：{args:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_hevc_or_non_iso_bmff_outputs_never_receive_a_container_tag() {
+        for (container, codec) in [
+            ("mp4", "libx264"),
+            ("mp4", "av1_nvenc"),
+            ("mov", "prores"),
+            ("mkv", "libx265"),
+            ("webm", "vp9"),
+            ("m2ts", "hevc_nvenc"),
+        ] {
+            let config = sample_config(container, codec);
+            let args = build_ffmpeg_args("in.mkv", "out", &config, &sample_probe()).unwrap();
+            assert!(
+                !args.iter().any(|arg| arg == "-tag:v"),
+                "{codec} 进 {container} 不应发容器标签：{args:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn stream_copy_carries_the_hvc1_tag_only_for_hevc_sources() {
+        let mut hevc_probe = sample_probe();
+        hevc_probe.video_codec = Some("hevc".to_string());
+
+        for container in ["mp4", "mov"] {
+            let mut config = sample_config(container, "libx264");
+            config.processing_mode = "copy".to_string();
+            let args = build_ffmpeg_args("in.mkv", "out", &config, &hevc_probe)
+                .expect("stream-copy arguments should build");
+            assert!(
+                args_contains_pair(&args, "-tag:v", "hvc1"),
+                "copy 模式源为 HEVC、目标 {container} 应补 hvc1：{args:?}"
+            );
+        }
+
+        let mut mkv_copy = sample_config("mkv", "libx264");
+        mkv_copy.processing_mode = "copy".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out", &mkv_copy, &hevc_probe)
+            .expect("stream-copy arguments should build");
+        assert!(
+            !args.iter().any(|arg| arg == "-tag:v"),
+            "Matroska 没有 sample entry 概念：{args:?}"
+        );
+
+        let mut h264_copy = sample_config("mp4", "libx264");
+        h264_copy.processing_mode = "copy".to_string();
+        let args = build_ffmpeg_args("in.mov", "out", &h264_copy, &sample_probe())
+            .expect("stream-copy arguments should build");
+        assert!(
+            !args.iter().any(|arg| arg == "-tag:v"),
+            "源非 HEVC 不发标签：{args:?}"
+        );
+    }
+
+    #[test]
+    fn iso_bmff_outputs_move_the_moov_index_to_the_front() {
+        for container in ["mp4", "mov", "MP4"] {
+            for processing_mode in ["reencode", "copy"] {
+                let mut config = sample_config(container, "libx264");
+                config.processing_mode = processing_mode.to_string();
+                let args = build_ffmpeg_args("in.mkv", "out", &config, &sample_probe())
+                    .expect("arguments should build");
+                assert!(
+                    args_contains_pair(&args, "-movflags", "+faststart"),
+                    "{container} / {processing_mode} 应前置 moov：{args:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn non_iso_bmff_outputs_never_receive_movflags() {
+        for container in ["mkv", "m2ts", "webm"] {
+            let mut config = sample_config(container, "libx264");
+            config.processing_mode = "reencode".to_string();
+            let args = build_ffmpeg_args("in.mp4", "out", &config, &sample_probe())
+                .expect("arguments should build");
+            assert!(
+                !args.iter().any(|arg| arg == "-movflags"),
+                "{container} 不是 ISO BMFF，不应收到 movflags：{args:?}"
+            );
+        }
     }
 
     #[test]

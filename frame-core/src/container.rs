@@ -52,6 +52,13 @@ pub const fn is_transport_stream_container(container: &str) -> bool {
     transport_stream_profile(container).is_some()
 }
 
+/// ISO BMFF 容器（MP4 / MOV）：编码器用 sample entry FourCC 标识，容器层还有
+/// moov 布局等可调项。Matroska/WebM 没有这些概念，MPEG-TS 用 stream_type 标识。
+#[must_use]
+pub fn is_iso_bmff_container(container: &str) -> bool {
+    container.eq_ignore_ascii_case("mp4") || container.eq_ignore_ascii_case("mov")
+}
+
 /// Returns the canonical media-rules key for a public container id.
 #[must_use]
 pub fn media_rules_key(container: &str) -> String {
@@ -83,5 +90,15 @@ mod tests {
         assert_eq!(media_rules_key("MP4"), "mp4");
         assert_eq!(media_rules_key("mts"), "m2ts");
         assert_eq!(media_rules_key("m2t"), "mpegts");
+    }
+
+    #[test]
+    fn iso_bmff_containers_are_recognized_case_insensitively() {
+        for container in ["mp4", "MP4", "mov", "Mov"] {
+            assert!(is_iso_bmff_container(container), "{container} 是 ISO BMFF");
+        }
+        for container in ["mkv", "webm", "m2ts", "m2t", "mp3", ""] {
+            assert!(!is_iso_bmff_container(container), "{container} 不是 ISO BMFF");
+        }
     }
 }
