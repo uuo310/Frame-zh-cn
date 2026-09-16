@@ -203,20 +203,26 @@ fn frame_checkbox_row_inner(
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
         .font_weight(theme::TEXT_WEIGHT_MEDIUM)
         .text_color(color(palette.text_muted))
+        .min_w_0()
         .child(display_label);
     let hint_text = div()
         .text_size(theme::ui_rem(FRAME_CHECKBOX_HINT_SIZE))
         .font_weight(theme::TEXT_WEIGHT_REGULAR)
         .text_color(color(palette.text_muted))
+        .min_w_0()
+        .text_right()
         .child(hint);
     let text_block = if hint_inline {
         div()
             .flex()
+            .flex_1()
             .items_center()
             .gap_2()
             .min_w_0()
             .child(label_text)
-            .when(has_hint, |this| this.child(hint_text))
+            .when(has_hint, |this| {
+                this.child(div().flex_1().min_w_0()).child(hint_text)
+            })
     } else {
         div()
             .flex()
