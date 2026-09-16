@@ -956,6 +956,66 @@ fn settings_video_prores_profile_grid(
     grid
 }
 
+/// 两个率控模式按钮的完整规格：`(mode, 显示文案, 徽章文案)`。
+///
+/// 按钮身份、文案、徽章绑在同一个元组里，所以调换数组元素的顺序只会改变按钮的
+/// 左右次序，不可能把徽章错配到另一个按钮上。
+///
+/// 「目标码率」按钮上的徽章**常驻**，不随「当前选中哪个模式」开关：它报的是该模式
+/// 下将会生效的率控模式（未启用码率约束 → ABR，启用 → VBR），所以切换模式之前就能
+/// 看到切过去会是什么。「恒定质量」按钮恒不带徽章。
+///
+/// 徽章判据与「启用码率约束」复选框同源：该复选框的选中态就是
+/// `!config.video_maxrate.is_empty()`。
+fn bitrate_mode_buttons(
+    config: &ConversionConfig,
+) -> [(&'static str, &'static str, Option<&'static str>); 2] {
+    let badge = if config.video_maxrate.is_empty() {
+        "ABR"
+    } else {
+        "VBR"
+    };
+    [("crf", "恒定质量", None), ("bitrate", "目标码率", Some(badge))]
+}
+
+/// 率控模式徽章：外层绝对定位、不参与按钮的 flex 排版，因此按钮文字仍保持居中；
+/// 内层才是那颗胶囊本体，靠外层 `items_center` 垂直居中。
+///
+/// 底色用 `surface_elevated`（选中态按钮底色是 `border_subtle` 的浅/深叠加），
+/// 深色主题下比按钮深、浅色主题下比按钮亮，两套主题里都能和按钮底色拉开差异；
+/// 再配一圈 `border_subtle` 描边保证边界，文字用 `text_muted` 不与主标题抢权重。
+///
+/// 徽章是按钮内的独立 hitbox，鼠标落在它上面时不会触发按钮自身的悬停光标，
+/// 因此 `enabled` 时自己补一个手型；禁用态保持默认，不显示手型。
+fn bitrate_mode_badge_element(
+    label: &'static str,
+    enabled: bool,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_1()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .px_1()
+                .py_0p5()
+                .rounded_full()
+                .border_1()
+                .border_color(color(palette.border_subtle))
+                .bg(color(palette.surface_elevated))
+                .text_color(color(palette.text_muted))
+                .text_size(theme::ui_rem(10.0))
+                .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+                .line_height(theme::ui_rem(12.0))
+                .when(enabled, gpui::Styled::cursor_pointer)
+                .child(theme::ui_text(label)),
+        )
+}
+
 fn settings_video_bitrate_mode_grid(
     config: &ConversionConfig,
     disabled: bool,
@@ -964,7 +1024,7 @@ fn settings_video_bitrate_mode_grid(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let mut grid = div().grid().grid_cols(2).gap_2();
-    for (mode, label) in [("crf", "恒定质量"), ("bitrate", "目标码率")] {
+    for (mode, label, badge) in bitrate_mode_buttons(config) {
         grid = grid.child(
             frame_choice_button(
                 format!("video-bitrate-mode-{mode}"),
@@ -975,6 +1035,10 @@ fn settings_video_bitrate_mode_grid(
                 window,
                 cx,
             )
+            .relative()
+            .when_some(badge, |button, badge| {
+                button.child(bitrate_mode_badge_element(badge, !disabled, palette))
+            })
             .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
                 cx.stop_propagation();
                 if disabled {
@@ -1490,5 +1554,71 @@ mod tests {
     fn video_profile_options_disable_every_tier_while_locked() {
         let options = video_profile_options(&config_with_codec("libx264"), true);
         assert!(options.iter().all(|option| !option.enabled));
+    }
+
+    /// 按 `mode` 取出该按钮的徽章，而不是按下标。
+    ///
+    /// 按下标断言会退化成同义反复（旧版 `badges[0]` 在任何输入下都是 `None`），
+    /// 也会漏掉「徽章挂错按钮」这类错误；按 mode 查则两者都能抓住。
+    fn badge_for_mode(config: &ConversionConfig, mode: &str) -> Option<&'static str> {
+        let (_, _, badge) = bitrate_mode_buttons(config)
+            .into_iter()
+            .find(|(candidate, _, _)| *candidate == mode)
+            .unwrap_or_else(|| panic!("按钮规格里没有 {mode} 这个模式"));
+        badge
+    }
+
+    fn config_with_bitrate_mode(mode: &str, maxrate: &str) -> ConversionConfig {
+        ConversionConfig {
+            video_bitrate_mode: mode.to_string(),
+            video_maxrate: maxrate.to_string(),
+            ..ConversionConfig::default()
+        }
+    }
+
+    #[test]
+    fn bitrate_mode_buttons_keep_the_abr_badge_while_crf_is_selected() {
+        let config = config_with_bitrate_mode("crf", "");
+        assert_eq!(
+            badge_for_mode(&config, "bitrate"),
+            Some("ABR"),
+            "徽章常驻：即使当前选中 CRF，也照报目标码率模式下将生效的率控模式"
+        );
+    }
+
+    #[test]
+    fn bitrate_mode_buttons_keep_the_vbr_badge_while_crf_is_selected() {
+        let config = config_with_bitrate_mode("crf", "8000");
+        assert_eq!(
+            badge_for_mode(&config, "bitrate"),
+            Some("VBR"),
+            "徽章常驻：已启用码率约束时，即使当前选中 CRF 也报 VBR"
+        );
+    }
+
+    #[test]
+    fn bitrate_mode_buttons_mark_the_bitrate_button_abr_without_a_cap() {
+        let config = config_with_bitrate_mode("bitrate", "");
+        assert_eq!(badge_for_mode(&config, "bitrate"), Some("ABR"));
+    }
+
+    #[test]
+    fn bitrate_mode_buttons_mark_the_bitrate_button_vbr_with_a_cap() {
+        let config = config_with_bitrate_mode("bitrate", "8000");
+        assert_eq!(badge_for_mode(&config, "bitrate"), Some("VBR"));
+    }
+
+    #[test]
+    fn bitrate_mode_buttons_never_badge_the_constant_quality_button() {
+        for mode in ["crf", "bitrate"] {
+            for maxrate in ["", "8000"] {
+                let config = config_with_bitrate_mode(mode, maxrate);
+                assert_eq!(
+                    badge_for_mode(&config, "crf"),
+                    None,
+                    "选中 {mode} / maxrate={maxrate:?} 时「恒定质量」按钮都不挂徽章"
+                );
+            }
+        }
     }
 }
