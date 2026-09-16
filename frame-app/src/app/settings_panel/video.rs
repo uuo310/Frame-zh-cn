@@ -777,22 +777,6 @@ fn settings_video_quality_section(
     section
 }
 
-/// psy 字段标签行：主名居左、取值范围/默认括注贴右（备注贴右裁定）。
-fn settings_psy_field_label(
-    label: &'static str,
-    note: &'static str,
-    palette: &'static theme::ThemePalette,
-) -> gpui::Div {
-    div()
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap_2()
-        .min_w_0()
-        .child(settings_field_label(label, palette).flex_1().min_w_0())
-        .child(settings_hint_text(note, palette).min_w_0().text_right())
-}
-
 /// 心理视觉优化（策略型 UI：只暴露 psy-rd 与 x264 总开关，其余跟随编码器默认）。
 /// psy 与率控正交，恒定质量/目标码率档都生效。
 fn settings_video_psy_section(
@@ -827,9 +811,8 @@ fn settings_video_psy_section(
                     },
                 ))
                 .when(!config.x264_disable_psy, |this| {
-                    this.child(settings_psy_field_label(
-                        "心理视觉强度 psy-rd",
-                        "（0–10，空 = 跟随默认 1.0）",
+                    this.child(settings_field_label(
+                        "心理视觉强度 psy-rd（0–10，空 = 跟随默认 1.0）",
                         palette,
                     ))
                     .child(frame_text_input(
@@ -849,9 +832,8 @@ fn settings_video_psy_section(
         }
         "libx265" => {
             section = section
-                .child(settings_psy_field_label(
-                    "心理视觉强度 psy-rd",
-                    "（0–5，空 = 跟随默认 2.0）",
+                .child(settings_field_label(
+                    "心理视觉强度 psy-rd（0–5，空 = 跟随默认 2.0）",
                     palette,
                 ))
                 .child(frame_text_input(
@@ -867,9 +849,8 @@ fn settings_video_psy_section(
                     window,
                     cx,
                 ))
-                .child(settings_psy_field_label(
-                    "心理视觉量化 psy-rdoq",
-                    "（0–60，空 = 跟随默认 0）",
+                .child(settings_field_label(
+                    "心理视觉量化 psy-rdoq（0–60，空 = 跟随默认 0）",
                     palette,
                 ))
                 .child(frame_text_input(
