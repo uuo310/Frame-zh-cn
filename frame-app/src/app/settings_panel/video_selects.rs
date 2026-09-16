@@ -14,14 +14,17 @@ use super::super::motion::{
     subtitle_popover_slide_offset,
 };
 use crate::settings::{
-    apply_fps, apply_pixel_format, apply_resolution, apply_scaling_algorithm, apply_video_codec,
-    apply_video_preset,
+    apply_fps, apply_nvenc_h264_profile, apply_pixel_format, apply_resolution,
+    apply_scaling_algorithm, apply_video_codec, apply_video_preset, apply_x264_profile,
 };
 use crate::SETTINGS_CONTROL_HEIGHT;
 use gpui::{FocusHandle, relative};
 
 pub(in crate::app) const VIDEO_SELECT_TRIGGER_WIDTH_RATIO: f32 = 0.75;
 pub(in crate::app) const VIDEO_SELECT_LABEL_COLUMN_WIDTH: f32 = 64.0;
+/// 「跟随默认」档的 option id。该档的值本身是空串，但 option id 会被拼进 DOM id
+/// （`{control_id}-option-{id}`），空串会留下悬空后缀 ⇒ 用具名 id，提交时映射回空串。
+pub(in crate::app) const VIDEO_PROFILE_AUTO_OPTION_ID: &str = "auto";
 const VIDEO_SELECT_POPOVER_GAP: f32 = 4.0;
 const VIDEO_SELECT_POPOVER_TOP_OFFSET: f32 =
     SETTINGS_CONTROL_HEIGHT + VIDEO_SELECT_POPOVER_GAP;
@@ -41,6 +44,7 @@ pub(in crate::app) enum VideoSelectId {
     Resolution,
     Scaling,
     Fps,
+    Profile,
 }
 
 pub(in crate::app) const ALL_VIDEO_SELECTS: &[VideoSelectId] = &[
@@ -50,6 +54,7 @@ pub(in crate::app) const ALL_VIDEO_SELECTS: &[VideoSelectId] = &[
     VideoSelectId::Resolution,
     VideoSelectId::Scaling,
     VideoSelectId::Fps,
+    VideoSelectId::Profile,
 ];
 
 impl VideoSelectId {
@@ -62,6 +67,7 @@ impl VideoSelectId {
             Self::Resolution => 3,
             Self::Scaling => 4,
             Self::Fps => 5,
+            Self::Profile => 6,
         }
     }
 
@@ -73,6 +79,7 @@ impl VideoSelectId {
             Self::Resolution => "video-resolution-select",
             Self::Scaling => "video-scaling-select",
             Self::Fps => "video-fps-select",
+            Self::Profile => "video-profile-select",
         }
     }
 
@@ -84,6 +91,7 @@ impl VideoSelectId {
             Self::Resolution => "video-resolution-select-options",
             Self::Scaling => "video-scaling-select-options",
             Self::Fps => "video-fps-select-options",
+            Self::Profile => "video-profile-select-options",
         }
     }
 
@@ -95,6 +103,7 @@ impl VideoSelectId {
             Self::Resolution => "video-resolution-select-options-list",
             Self::Scaling => "video-scaling-select-options-list",
             Self::Fps => "video-fps-select-options-list",
+            Self::Profile => "video-profile-select-options-list",
         }
     }
 
@@ -106,6 +115,7 @@ impl VideoSelectId {
             Self::Resolution => "video-resolution-select-options-scrollbar",
             Self::Scaling => "video-scaling-select-options-scrollbar",
             Self::Fps => "video-fps-select-options-scrollbar",
+            Self::Profile => "video-profile-select-options-scrollbar",
         }
     }
 
@@ -117,6 +127,7 @@ impl VideoSelectId {
             Self::Resolution => "settings-video-resolution-select-motion",
             Self::Scaling => "settings-video-scaling-select-motion",
             Self::Fps => "settings-video-fps-select-motion",
+            Self::Profile => "settings-video-profile-select-motion",
         }
     }
 
@@ -128,6 +139,7 @@ impl VideoSelectId {
             Self::Resolution => "video-resolution-select-label",
             Self::Scaling => "video-scaling-select-label",
             Self::Fps => "video-fps-select-label",
+            Self::Profile => "video-profile-select-label",
         }
     }
 
@@ -139,15 +151,19 @@ impl VideoSelectId {
             Self::Resolution => "分辨率",
             Self::Scaling => "缩放算法",
             Self::Fps => "帧率",
+            Self::Profile => "编码兼容性",
         }
     }
 
     pub(in crate::app) const fn hint(self) -> Option<&'static str> {
         match self {
             Self::Preset => Some("Preset"),
-            Self::Codec | Self::PixelFormat | Self::Resolution | Self::Scaling | Self::Fps => {
-                None
-            }
+            Self::Codec
+            | Self::PixelFormat
+            | Self::Resolution
+            | Self::Scaling
+            | Self::Fps
+            | Self::Profile => None,
         }
     }
 }
@@ -551,6 +567,7 @@ impl FrameRoot {
             VideoSelectId::Resolution => self.settings_ui.video_resolution_select_popover,
             VideoSelectId::Scaling => self.settings_ui.video_scaling_select_popover,
             VideoSelectId::Fps => self.settings_ui.video_fps_select_popover,
+            VideoSelectId::Profile => self.settings_ui.video_profile_select_popover,
         }
     }
 
@@ -581,6 +598,7 @@ impl FrameRoot {
             VideoSelectId::Resolution => &mut self.settings_ui.video_resolution_select_popover,
             VideoSelectId::Scaling => &mut self.settings_ui.video_scaling_select_popover,
             VideoSelectId::Fps => &mut self.settings_ui.video_fps_select_popover,
+            VideoSelectId::Profile => &mut self.settings_ui.video_profile_select_popover,
         }
     }
 
@@ -656,6 +674,19 @@ impl FrameRoot {
                 self.update_selected_config(|config| apply_scaling_algorithm(config, option_id))
             }
             VideoSelectId::Fps => self.update_selected_config(|config| apply_fps(config, option_id)),
+            VideoSelectId::Profile => self.update_selected_config(|config| {
+                let value = if option_id == VIDEO_PROFILE_AUTO_OPTION_ID {
+                    ""
+                } else {
+                    option_id
+                };
+                let is_nvenc = config.video_codec == "h264_nvenc";
+                if is_nvenc {
+                    apply_nvenc_h264_profile(config, value)
+                } else {
+                    apply_x264_profile(config, value)
+                }
+            }),
         };
         self.close_video_select(id);
         changed

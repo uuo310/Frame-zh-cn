@@ -327,6 +327,26 @@ impl Render for FrameRoot {
                     video_selects_enabled,
                     cx,
                 );
+                let video_profile_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-profile-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_profile_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-profile-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_profile_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-profile-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_profile_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-profile-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
                 let preview_start_time_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::PreviewStartTime, cx);
                 let preview_end_time_focus =
@@ -629,6 +649,17 @@ impl Render for FrameRoot {
                             panel: Some(&video_fps_select_panel_focus),
                             first_option: Some(&video_fps_select_first_focus),
                             last_option: Some(&video_fps_select_last_focus),
+                        },
+                    },
+                    video_profile_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_profile_select_popover,
+                        scroll_handle: &self.settings_ui.video_profile_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::Profile),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_profile_select_trigger_focus),
+                            panel: Some(&video_profile_select_panel_focus),
+                            first_option: Some(&video_profile_select_first_focus),
+                            last_option: Some(&video_profile_select_last_focus),
                         },
                     },
                     metadata_focuses: SettingsMetadataInputFocuses {

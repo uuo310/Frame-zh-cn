@@ -4017,6 +4017,7 @@ mod preview_shell {
         let video_resolution_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let video_scaling_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let video_fps_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_profile_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
 
         SettingsRenderState {
             palette: theme::palette(crate::appearance::ColorTheme::Dark),
@@ -4102,6 +4103,17 @@ mod preview_shell {
             video_fps_select: SettingsVideoSelectUi {
                 popover: PopoverState::Hidden,
                 scroll_handle: video_fps_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_profile_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_profile_select_scroll_handle,
                 anchor_y: None,
                 focuses: SettingsSelectFocuses {
                     trigger: None,

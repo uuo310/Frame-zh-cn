@@ -136,9 +136,9 @@ use crate::{
         apply_subtitle_outline_color, apply_subtitle_position, apply_trim_times,
         apply_video_bitrate, apply_video_bitrate_mode, apply_video_bufsize, apply_video_maxrate,
         apply_video_two_pass, apply_video_vbv_enabled, apply_x264_disable_psy,
-        apply_x264_profile, apply_x264_psy_rd, apply_x265_multipass_opt_analysis,
+        apply_x264_psy_rd, apply_x265_multipass_opt_analysis,
         apply_x265_multipass_opt_distortion, apply_x265_psy_rd, apply_x265_psy_rdoq,
-        apply_nvenc_h264_profile, apply_prores_profile,
+        apply_prores_profile,
         apply_videotoolbox_allow_sw, audio_channel_options, audio_codec_options,
         audio_codec_supports_vbr, audio_quality_range, audio_track_options, create_custom_preset,
         default_presets, fps_options, gif_color_options, gif_dither_options,
@@ -358,9 +358,11 @@ struct SettingsUiState {
     video_scaling_select_scroll: ScrollHandle,
     video_fps_select_popover: PopoverState,
     video_fps_select_scroll: ScrollHandle,
+    video_profile_select_popover: PopoverState,
+    video_profile_select_scroll: ScrollHandle,
     /// Popover placement anchor (window-space mouse y at last hover), one slot
     /// per video select row; frozen while that row's popover is not Hidden.
-    video_select_anchor_y: [Option<f32>; 6],
+    video_select_anchor_y: [Option<f32>; 7],
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -483,7 +485,9 @@ impl Default for SettingsUiState {
             video_scaling_select_scroll: ScrollHandle::new(),
             video_fps_select_popover: PopoverState::Hidden,
             video_fps_select_scroll: ScrollHandle::new(),
-            video_select_anchor_y: [None; 6],
+            video_profile_select_popover: PopoverState::Hidden,
+            video_profile_select_scroll: ScrollHandle::new(),
+            video_select_anchor_y: [None; 7],
         }
     }
 }
@@ -883,6 +887,7 @@ struct SettingsRenderState<'a> {
     video_resolution_select: SettingsVideoSelectUi<'a>,
     video_scaling_select: SettingsVideoSelectUi<'a>,
     video_fps_select: SettingsVideoSelectUi<'a>,
+    video_profile_select: SettingsVideoSelectUi<'a>,
     metadata_focuses: SettingsMetadataInputFocuses<'a>,
     subtitle_focuses: SettingsSubtitleFocuses<'a>,
     external_subtitle_language_focus: Option<&'a FocusHandle>,

@@ -43,6 +43,7 @@ pub(in crate::app) fn settings_video_tab(
     resolution_select: SettingsVideoSelectUi<'_>,
     scaling_select: SettingsVideoSelectUi<'_>,
     fps_select: SettingsVideoSelectUi<'_>,
+    profile_select: SettingsVideoSelectUi<'_>,
     metadata: Option<&SourceMetadata>,
     tooltip_visible_id: Option<&str>,
     palette: &'static theme::ThemePalette,
@@ -111,6 +112,11 @@ pub(in crate::app) fn settings_video_tab(
         })
         .collect::<Vec<_>>();
     let fps_selected_label = fps_label(&config.fps);
+    let profile_options = video_profile_options(config, settings_disabled);
+    let profile_selected_label = profile_options
+        .iter()
+        .find(|option| option.selected)
+        .map_or_else(|| "跟随默认".to_string(), |option| option.label.clone());
     let mut content = div().flex().flex_col().gap_4().child(video_select_row(
         VideoSelectRowState {
             id: VideoSelectId::Resolution,
@@ -254,6 +260,26 @@ pub(in crate::app) fn settings_video_tab(
                 ))
             },
         )
+        // 编码兼容性＝编码器的一次性取向（决定「谁能播」），不是质量控制环节
+        // ⇒ 归入上方编码器参数族，紧随「编码速度」。仅 H.264 两系有该档位。
+        .when(
+            config.video_codec == "libx264" || config.video_codec == "h264_nvenc",
+            |this| {
+                this.child(video_select_row(
+                    VideoSelectRowState {
+                        id: VideoSelectId::Profile,
+                        options: profile_options,
+                        selected_label: profile_selected_label,
+                        enabled: !settings_disabled,
+                        tooltip_visible_id,
+                        palette,
+                        ui: profile_select,
+                    },
+                    window,
+                    cx,
+                ))
+            },
+        )
         .child(settings_video_quality_section(
             config,
             settings_disabled,
@@ -262,18 +288,6 @@ pub(in crate::app) fn settings_video_tab(
             window,
             cx,
         ))
-        .when(
-            config.video_codec == "libx264" || config.video_codec == "h264_nvenc",
-            |this| {
-                this.child(settings_video_profile_block(
-                    config,
-                    settings_disabled,
-                    palette,
-                    window,
-                    cx,
-                ))
-            },
-        )
         .when(
             config.video_codec == "libx264" || config.video_codec == "libx265",
             |this| {
@@ -857,63 +871,40 @@ fn settings_video_psy_section(
     section
 }
 
-/// 编码兼容性（H.264 软件 / NVIDIA）：兼容性取向，默认跟随编码器。
-fn settings_video_profile_block(
+/// 编码兼容性下拉项（H.264 软件 / NVIDIA）：兼容性取向，默认跟随编码器。
+///
+/// caption 显示该档实际要发的 profile 值；「跟随默认」的 caption 给出该编码器
+/// 自己的默认档（x264 自动落 High、NVENC 默认 Main）。
+fn video_profile_options(
     config: &ConversionConfig,
-    disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let codec = config.video_codec.clone();
-    let selected = if codec == "h264_nvenc" {
-        config.nvenc_h264_profile.clone()
+    settings_disabled: bool,
+) -> Vec<VideoSelectOption> {
+    let is_nvenc = config.video_codec == "h264_nvenc";
+    let selected = if is_nvenc {
+        config.nvenc_h264_profile.as_str()
     } else {
-        config.x264_profile.clone()
+        config.x264_profile.as_str()
     };
-    let mut grid = div().grid().grid_cols(4).gap_2();
-    for (value, label) in [
-        ("", "跟随默认"),
-        ("baseline", "Baseline"),
-        ("main", "Main"),
-        ("high", "High"),
-    ] {
-        let value = value.to_string();
-        let codec = codec.clone();
-        grid = grid.child(
-            frame_choice_button(
-                format!(
-                    "video-h264-profile-{}",
-                    if value.is_empty() { "auto" } else { &value }
-                ),
-                label,
-                selected == value,
-                !disabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if disabled {
-                    return;
-                }
-                let changed = root.update_selected_config(|config| match codec.as_str() {
-                    "h264_nvenc" => apply_nvenc_h264_profile(config, &value),
-                    _ => apply_x264_profile(config, &value),
-                });
-                if changed {
-                    cx.notify();
-                }
-            })),
-        );
+    // 8-bit 档位与 10-bit 像素格式互斥（实测 x264 `-profile high` × `yuv420p10le`
+    // 直接硬报错）⇒ 10-bit 下三档置灰，只留「跟随默认」（落到 High 10 档案）。
+    let eight_bit_blocked = frame_core::profile::is_ten_bit_pixel_format(&config.pixel_format);
+    let mut options = vec![VideoSelectOption {
+        id: VIDEO_PROFILE_AUTO_OPTION_ID,
+        label: "跟随默认".to_string(),
+        caption: if is_nvenc { "NVENC 默认" } else { "x264 自动" }.to_string(),
+        selected: selected.is_empty(),
+        enabled: !settings_disabled,
+    }];
+    for (value, label) in [("baseline", "Baseline"), ("main", "Main"), ("high", "High")] {
+        options.push(VideoSelectOption {
+            id: value,
+            label: label.to_string(),
+            caption: value.to_string(),
+            selected: selected == value,
+            enabled: !settings_disabled && !eight_bit_blocked,
+        });
     }
-    div()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(settings_field_label("编码兼容性", palette))
-        .child(grid)
+    options
 }
 
 /// ProRes 档位（官方档位体系；ProRes 走 prores_ks 编码器）。
@@ -1438,5 +1429,66 @@ fn gif_dither_label(dither: &str) -> &'static str {
         "bayer" => "Bayer",
         "none" => "无",
         _ => "Sierra2_4a",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn config_with_codec(codec: &str) -> ConversionConfig {
+        ConversionConfig {
+            video_codec: codec.to_string(),
+            ..ConversionConfig::default()
+        }
+    }
+
+    #[test]
+    fn video_profile_options_list_the_four_h264_tiers() {
+        let options = video_profile_options(&config_with_codec("libx264"), false);
+        let ids: Vec<&str> = options.iter().map(|option| option.id).collect();
+        assert_eq!(ids, ["auto", "baseline", "main", "high"]);
+        assert!(options[0].selected, "未设档位时落在「跟随默认」");
+    }
+
+    #[test]
+    fn video_profile_options_caption_follows_the_encoder_default() {
+        let x264 = video_profile_options(&config_with_codec("libx264"), false);
+        assert_eq!(x264[0].caption, "x264 自动");
+        let nvenc = video_profile_options(&config_with_codec("h264_nvenc"), false);
+        assert_eq!(nvenc[0].caption, "NVENC 默认");
+    }
+
+    #[test]
+    fn video_profile_options_read_the_field_owned_by_the_encoder() {
+        let config = ConversionConfig {
+            video_codec: "h264_nvenc".to_string(),
+            nvenc_h264_profile: "high".to_string(),
+            x264_profile: "baseline".to_string(),
+            ..ConversionConfig::default()
+        };
+        let options = video_profile_options(&config, false);
+        assert!(options[3].selected, "NVENC 读 nvenc_h264_profile");
+        assert!(!options[1].selected, "不串用 x264 的档位");
+    }
+
+    #[test]
+    fn video_profile_options_grey_the_eight_bit_tiers_on_ten_bit_pixels() {
+        let config = ConversionConfig {
+            pixel_format: "yuv420p10le".to_string(),
+            ..ConversionConfig::default()
+        };
+        let options = video_profile_options(&config, false);
+        assert!(options[0].enabled, "10-bit 下「跟随默认」仍可用");
+        assert!(
+            options[1..].iter().all(|option| !option.enabled),
+            "10-bit 与 8-bit 档位互斥，三档置灰"
+        );
+    }
+
+    #[test]
+    fn video_profile_options_disable_every_tier_while_locked() {
+        let options = video_profile_options(&config_with_codec("libx264"), true);
+        assert!(options.iter().all(|option| !option.enabled));
     }
 }

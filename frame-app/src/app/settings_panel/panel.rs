@@ -317,6 +317,7 @@ pub(in crate::app) fn settings_tab_content(
             settings.video_resolution_select,
             settings.video_scaling_select,
             settings.video_fps_select,
+            settings.video_profile_select,
             settings.metadata,
             settings.tooltip_visible_id,
             palette,
