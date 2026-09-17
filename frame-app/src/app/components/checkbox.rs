@@ -172,8 +172,6 @@ fn frame_checkbox_row_inner(
     cx: &Context<FrameRoot>,
     action: impl Fn(&mut FrameRoot, &ClickEvent, &mut Window, &mut Context<FrameRoot>) + 'static,
 ) -> gpui::Stateful<gpui::Div> {
-    const FRAME_CHECKBOX_HINT_SIZE: f32 = 11.0;
-
     let id = id.into();
     let label = label.into();
     let display_label = theme::ui_text_owned(label.clone());
@@ -199,13 +197,17 @@ fn frame_checkbox_row_inner(
         apply_accessible_checkbox(indicator, label, enabled, checked, false, palette)
     };
 
-    let label_text = div()
-        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
-        .text_color(color(palette.text_muted))
-        .child(display_label);
+    let label_text = {
+        let mut emphasis = color(palette.text_primary);
+        emphasis.a *= theme::TEXT_EMPHASIS_ALPHA;
+        div()
+            .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+            .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+            .text_color(emphasis)
+            .child(display_label)
+    };
     let hint_text = div()
-        .text_size(theme::ui_rem(FRAME_CHECKBOX_HINT_SIZE))
+        .text_size(theme::ui_rem(theme::TEXT_HINT_SIZE))
         .font_weight(theme::TEXT_WEIGHT_REGULAR)
         .text_color(color(palette.text_muted))
         .child(hint);

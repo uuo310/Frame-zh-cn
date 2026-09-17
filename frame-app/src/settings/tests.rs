@@ -2362,11 +2362,6 @@ mod psy {
         assert!(apply_x264_psy_rd(&mut x264, "2.5"));
         assert_eq!(x264.x264_psy_rd, "2.5");
         assert!(!apply_x264_psy_rd(&mut x264, "10.1"), "x264 上限 10");
-
-        // x264 总开关只在 libx264 下可改
-        assert!(!apply_x264_disable_psy(&mut x265, true));
-        assert!(apply_x264_disable_psy(&mut x264, true));
-        assert!(x264.x264_disable_psy);
     }
 
     #[test]
@@ -2386,10 +2381,8 @@ mod psy {
             video_codec: "libx264".to_string(),
             ..ConversionConfig::default()
         };
-        x264.x264_disable_psy = true;
         x264.x264_psy_rd = "2".to_string();
         assert!(apply_video_codec(&mut x264, "libx265"));
-        assert!(!x264.x264_disable_psy);
         assert_eq!(x264.x264_psy_rd, "");
     }
 }

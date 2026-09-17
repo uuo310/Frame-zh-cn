@@ -640,17 +640,6 @@ fn sanitized_psy_value(value: &str, max: f32) -> Option<String> {
     (0.0..=max).contains(&parsed).then(|| trimmed.to_string())
 }
 
-/// x264 心理视觉总开关：关闭＝发 `psy=0`（彻底关闭心理视觉，实测独立于把
-/// psy-rd 清零）。默认 false＝不干预（编码器默认开启）。
-pub fn apply_x264_disable_psy(config: &mut ConversionConfig, enabled: bool) -> bool {
-    if config.video_codec != "libx264" || config.x264_disable_psy == enabled {
-        return false;
-    }
-
-    config.x264_disable_psy = enabled;
-    true
-}
-
 /// x264 心理视觉强度（psy-rd，0..=10）。空＝清除。
 pub fn apply_x264_psy_rd(config: &mut ConversionConfig, value: &str) -> bool {
     let Some(next) = sanitized_psy_value(value, X264_PSY_RD_MAX) else {
@@ -1267,7 +1256,6 @@ pub fn normalize_video_config(
     }
     // psy 只属于 x264/x265：编码器切走即清，不留看不见的状态。
     if config.video_codec != "libx264" {
-        config.x264_disable_psy = false;
         config.x264_psy_rd.clear();
     }
     if config.video_codec != "libx265" {

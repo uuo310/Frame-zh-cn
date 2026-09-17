@@ -254,6 +254,14 @@ pub const TEXT_WEIGHT_MEDIUM: FontWeight = FontWeight::MEDIUM;
 pub const FORCE_UPPERCASE_UI_TEXT: bool = false;
 pub const MIN_HIT_AREA: f32 = 40.0;
 
+/// 次级标题的提亮系数：在 `text_primary` 上乘该 α，落在 `text_muted`（≈0.52）与
+/// 节标题（0.80）之间一档。设置页字段标签与复选框行标题共用，保证全站同一层级。
+pub const TEXT_EMPHASIS_ALPHA: f32 = 0.62;
+
+/// 备注文字字号（设计像素）：标题旁的小字说明、组次标题后的档位备注、列底 hint
+/// 全站共用这一档，比正文 `TEXT_UI_BASE_SIZE` 小一号。输入框内的占位提示不属此类。
+pub const TEXT_HINT_SIZE: f32 = 10.0;
+
 /// Converts a base Frame logical-pixel token into a scalable rem length.
 #[must_use]
 pub const fn ui_rem(base_pixels: f32) -> Rems {

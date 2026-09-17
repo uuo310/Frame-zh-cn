@@ -14,6 +14,8 @@ struct SettingsVideoRangeDrag {
     target: SettingsVideoRangeTarget,
     min: u32,
     max: u32,
+    /// 视觉反向：滑轨左端对应最大值（硬编 CQ「左好右差」用），仅影响显示与输入映射。
+    reversed: bool,
 }
 
 struct SettingsVideoRangeDragPreview;
@@ -288,30 +290,18 @@ pub(in crate::app) fn settings_video_tab(
             window,
             cx,
         ))
-        .when(
-            config.video_codec == "libx264" || config.video_codec == "libx265",
-            |this| {
-                this.child(settings_video_psy_section(
-                    config,
-                    settings_disabled,
-                    focuses,
-                    palette,
-                    window,
-                    cx,
-                ))
-            },
-        )
-        .when(is_videotoolbox_video_codec(&config.video_codec), |this| {
-            this.child(settings_video_videotoolbox_section(
+        .when(settings_video_perception_visible(config), |this| {
+            this.child(settings_video_perception_section(
                 config,
                 settings_disabled,
+                focuses,
                 palette,
+                window,
                 cx,
             ))
         })
-        // NVENC 选项与硬件加速/解码置为下区末尾两节（此序）。
-        .when(is_nvenc_video_codec(&config.video_codec), |this| {
-            this.child(settings_video_nvenc_section(
+        .when(settings_video_multipass_visible(config), |this| {
+            this.child(settings_video_multipass_section(
                 config,
                 settings_disabled,
                 palette,
@@ -323,6 +313,7 @@ pub(in crate::app) fn settings_video_tab(
             config,
             settings_disabled,
             is_hardware_video_codec(&config.video_codec),
+            is_videotoolbox_video_codec(&config.video_codec),
             !matches!(hw_decode_backend(available_encoders), HwDecodeBackend::None),
             palette,
             cx,
@@ -491,7 +482,7 @@ pub(in crate::app) fn settings_video_gif_colors_section(
         );
     }
 
-    settings_section("调色板颜色", palette).child(grid)
+    settings_video_section("调色板颜色", palette).child(grid)
 }
 
 pub(in crate::app) fn settings_video_gif_dither_section(
@@ -527,7 +518,7 @@ pub(in crate::app) fn settings_video_gif_dither_section(
         );
     }
 
-    settings_section("抖动", palette).child(list)
+    settings_video_section("抖动", palette).child(list)
 }
 
 fn settings_video_gif_loop_section(
@@ -538,7 +529,7 @@ fn settings_video_gif_loop_section(
     window: &Window,
     cx: &Context<FrameRoot>,
 ) -> gpui::Div {
-    settings_section("循环次数", palette)
+    settings_video_section("循环次数", palette)
         .child(frame_text_input(
             FrameTextInputSpec {
                 id: "settings-gif-loop-field",
@@ -552,7 +543,81 @@ fn settings_video_gif_loop_section(
             window,
             cx,
         ))
-        .child(settings_hint_text("设为 0 表示无限循环。", palette))
+        .child(settings_hint_text("设为 0 表示无限循环", palette))
+}
+
+/// 次级标题的左线缩进（设计像素）：节标题贴左缘，组次标题与字段标签统一收到这条线上。
+/// 只有标题缩进——输入框、触发器、档框的位置一律不动。取值＝复选框文字起点
+/// （指示器 16 + 间距 8 = 24）再左移一个汉字宽，避免整宽标签贴着输入框折行。
+const VIDEO_SUBTITLE_INDENT: f32 = 11.0;
+
+/// 整宽码率字段的标签列宽（设计像素）：输入框左缘由它锁定，标签在其中缩进不推移它。
+const VIDEO_RATE_LABEL_COLUMN_WIDTH: f32 = 104.0;
+
+/// 列底说明的缩进身位（设计像素，约一个中文字符）：两条说明都退这一档求对称，
+/// 较长的那条配 `whitespace_nowrap` 保住单行。贴标题的备注一律走默认间距。
+const VIDEO_REMARK_GAP: f32 = 13.0;
+
+/// 「时间 AQ」块从行右端回退的身位（设计像素，约一个中文字符）：贴死右缘太靠后。
+const VIDEO_AQ_RIGHT_PULL: f32 = 13.0;
+
+/// 视频页标题分级亮度（在 `text_primary` 上乘 α）。一级＝节标题，与上半区七个下拉
+/// 标签同级＝全亮；二级继承节标题原来的 0.80；三级继承二级原来的 0.62。备注仍走
+/// `settings_hint_text`（`text_muted`≈0.52）。复选框行标题按裁定不分级，保持共享组件
+/// 那一档。只作用于视频页，其它设置页各自的档位不动。
+const VIDEO_LABEL_ALPHA_SECONDARY: f32 = 0.80;
+const VIDEO_LABEL_ALPHA_TERTIARY: f32 = 0.62;
+
+/// 视频页节标题：亮度提到与上半区下拉标签同级（全亮），分隔线与其余页同款。
+fn settings_video_section(label: &'static str, palette: &'static theme::ThemePalette) -> gpui::Div {
+    div().flex().flex_col().gap_3().child(
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+            .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+            .text_color(color(palette.text_primary))
+            .child(theme::ui_text(label))
+            .child(
+                div()
+                    .h(gpui::px(1.0))
+                    .w_full()
+                    .bg(color(palette.canvas))
+                    .shadow(horizontal_separator_shadows(palette)),
+            ),
+    )
+}
+
+/// 视频页二级标题（大项下的小项）。
+fn settings_video_field_label_secondary(
+    label: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    settings_video_field_label_at(label, VIDEO_LABEL_ALPHA_SECONDARY, palette)
+}
+
+/// 视频页三级标题（小项下的子项）。
+fn settings_video_field_label_tertiary(
+    label: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    settings_video_field_label_at(label, VIDEO_LABEL_ALPHA_TERTIARY, palette)
+}
+
+fn settings_video_field_label_at(
+    label: &'static str,
+    alpha: f32,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    let mut text_color = color(palette.text_primary);
+    text_color.a *= alpha;
+    div()
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(text_color)
+        .child(theme::ui_text(label))
 }
 
 fn settings_video_quality_section(
@@ -563,12 +628,12 @@ fn settings_video_quality_section(
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    let mut section = settings_section("质量控制", palette);
+    let mut section = settings_video_section("质量控制", palette);
     // ProRes 的质量控制＝档位（无 CRF/码率/VBV：底层没有这些选项，实测发出去
     // 只会得到「has not been used for any stream」警告）。
     if config.video_codec == "prores" {
         return section
-            .child(settings_field_label("ProRes 档位", palette))
+            .child(settings_video_field_label_secondary("ProRes 档位", palette))
             .child(settings_video_prores_profile_grid(
                 config,
                 settings_disabled,
@@ -596,7 +661,7 @@ fn settings_video_quality_section(
                 "质量因子"
             },
             if is_hardware {
-                format!("Q {}", config.quality)
+                format!("CQ {}", config.quality)
             } else {
                 format!("CRF {}", config.crf)
             },
@@ -607,21 +672,20 @@ fn settings_video_quality_section(
             },
             u32::from(is_hardware),
             if is_hardware { 100 } else { 51 },
-            if is_hardware {
-                "低质量"
-            } else {
-                "无损"
-            },
+            // 两族统一「左好右差」：CRF 数值越小越好（左＝无损），CQ 数值越大越好，
+            // 故硬编反向显示、端点随之对调。
             if is_hardware {
                 "最佳质量"
             } else {
-                "最小"
+                "无损"
             },
+            if is_hardware { "低质量" } else { "最小" },
             if is_hardware {
                 SettingsVideoRangeTarget::Quality
             } else {
                 SettingsVideoRangeTarget::Crf
             },
+            is_hardware,
             settings_disabled,
             palette,
             cx,
@@ -633,20 +697,36 @@ fn settings_video_quality_section(
             .flex_col()
             .gap_2()
             .pt(theme::ui_rem(4.0))
-            .child(settings_field_label("平均码率 (kbps)", palette))
-            .child(frame_text_input(
-                FrameTextInputSpec {
-                    id: "settings-video-bitrate-field",
-                    value: &config.video_bitrate,
-                    placeholder: "5000",
-                    disabled: settings_disabled,
-                    focus: focuses.bitrate,
-                    kind: FrameTextInputKind::VideoBitrate,
-                },
-                palette,
-                window,
-                cx,
-            ))
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_none()
+                            .whitespace_nowrap()
+                            .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
+                            .w(theme::ui_rem(VIDEO_RATE_LABEL_COLUMN_WIDTH))
+                            .child(settings_video_field_label_secondary(
+                                "平均码率 (kbps)",
+                                palette,
+                            )),
+                    )
+                    .child(div().flex_1().min_w_0().child(frame_text_input(
+                        FrameTextInputSpec {
+                            id: "settings-video-bitrate-field",
+                            value: &config.video_bitrate,
+                            placeholder: "5000",
+                            disabled: settings_disabled,
+                            focus: focuses.bitrate,
+                            kind: FrameTextInputKind::VideoBitrate,
+                        },
+                        palette,
+                        window,
+                        cx,
+                    ))),
+            )
             .child(settings_video_checkbox_row(
                 "video-vbv-enable",
                 "启用码率约束",
@@ -666,110 +746,61 @@ fn settings_video_quality_section(
                         cx.notify();
                     }
                 },
-            ))
-            .when(
-                frame_core::twopass::is_supported(&config.video_codec),
-                |this| {
-                    this.child(settings_video_checkbox_row(
-                        "video-two-pass",
-                        "两遍编码",
-                        "先统计整片再分配码率，命中更准，耗时翻倍",
-                        config.video_two_pass,
-                        settings_disabled,
-                        palette,
-                        cx,
-                        move |root, _event, _window, cx| {
-                            if settings_disabled {
-                                return;
-                            }
-                            if root.update_selected_config(|config| {
-                                apply_video_two_pass(config, !config.video_two_pass)
-                            }) {
-                                cx.notify();
-                            }
-                        },
-                    ))
-                    .when(
-                        config.video_codec == "libx265" && config.video_two_pass,
-                        |this| {
-                            this.child(settings_video_checkbox_row(
-                                "video-x265-analysis-refinement",
-                                "分析精炼",
-                                "x265 两遍附加：首遍多存分析信息，次遍决策更准，更耗时",
-                                config.x265_multipass_opt_analysis,
-                                settings_disabled,
-                                palette,
-                                cx,
-                                move |root, _event, _window, cx| {
-                                    if settings_disabled {
-                                        return;
-                                    }
-                                    if root.update_selected_config(|config| {
-                                        apply_x265_multipass_opt_analysis(
-                                            config,
-                                            !config.x265_multipass_opt_analysis,
-                                        )
-                                    }) {
-                                        cx.notify();
-                                    }
-                                },
-                            ))
-                            .child(settings_video_checkbox_row(
-                                "video-x265-distortion-refinement",
-                                "畸变精炼",
-                                "x265 两遍附加：首遍多存失真信息，次遍码率分配更准，更耗时",
-                                config.x265_multipass_opt_distortion,
-                                settings_disabled,
-                                palette,
-                                cx,
-                                move |root, _event, _window, cx| {
-                                    if settings_disabled {
-                                        return;
-                                    }
-                                    if root.update_selected_config(|config| {
-                                        apply_x265_multipass_opt_distortion(
-                                            config,
-                                            !config.x265_multipass_opt_distortion,
-                                        )
-                                    }) {
-                                        cx.notify();
-                                    }
-                                },
-                            ))
-                        },
-                    )
-                },
-            );
+            ));
+        // 两遍编码族不在本节：与 NVENC 的预看帧数／多遍分析同属「多遍与前瞻」。
         if vbv_enabled {
-            bitrate = bitrate
-                .child(settings_field_label("最大码率 (kbps)", palette))
-                .child(frame_text_input(
-                    FrameTextInputSpec {
-                        id: "settings-video-maxrate-field",
-                        value: &config.video_maxrate,
-                        placeholder: "8000",
-                        disabled: settings_disabled,
-                        focus: focuses.maxrate,
-                        kind: FrameTextInputKind::VideoMaxrate,
-                    },
-                    palette,
-                    window,
-                    cx,
-                ))
-                .child(settings_field_label("VBV 缓冲 (kbit)", palette))
-                .child(frame_text_input(
-                    FrameTextInputSpec {
-                        id: "settings-video-bufsize-field",
-                        value: &config.video_bufsize,
-                        placeholder: "16000",
-                        disabled: settings_disabled,
-                        focus: focuses.bufsize,
-                        kind: FrameTextInputKind::VideoBufsize,
-                    },
-                    palette,
-                    window,
-                    cx,
-                ));
+            // 两个约束参数同族同量纲，并列一行；栅格间距沿用全页 grid_cols(2) + gap_2
+            // 的既有口径，列内保持「标签在上、输入框在下」。软硬编共用这段渲染。
+            bitrate = bitrate.child(
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(div().pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT)).child(
+                                settings_video_field_label_tertiary("最大码率 (kbps)", palette),
+                            ))
+                            .child(frame_text_input(
+                                FrameTextInputSpec {
+                                    id: "settings-video-maxrate-field",
+                                    value: &config.video_maxrate,
+                                    placeholder: "8000",
+                                    disabled: settings_disabled,
+                                    focus: focuses.maxrate,
+                                    kind: FrameTextInputKind::VideoMaxrate,
+                                },
+                                palette,
+                                window,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(div().pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT)).child(
+                                settings_video_field_label_tertiary("VBV 缓冲 (kbit)", palette),
+                            ))
+                            .child(frame_text_input(
+                                FrameTextInputSpec {
+                                    id: "settings-video-bufsize-field",
+                                    value: &config.video_bufsize,
+                                    placeholder: "16000",
+                                    disabled: settings_disabled,
+                                    focus: focuses.bufsize,
+                                    kind: FrameTextInputKind::VideoBufsize,
+                                },
+                                palette,
+                                window,
+                                cx,
+                            )),
+                    ),
+            );
         }
         section = section.child(bitrate);
     }
@@ -777,95 +808,200 @@ fn settings_video_quality_section(
     section
 }
 
-/// 心理视觉优化（策略型 UI：只暴露 psy-rd 与 x264 总开关，其余跟随编码器默认）。
-/// psy 与率控正交，恒定质量/目标码率档都生效。
-fn settings_video_psy_section(
+/// 「感知优化」节可见性：软编 psy（x264/x265）与 NVENC 空间/时间 AQ 同属一族；
+/// `av1_nvenc` 不暴露 `-spatial_aq`/`-temporal_aq`、`VideoToolbox` 无 psy ⇒ 整节隐藏。
+fn settings_video_perception_visible(config: &ConversionConfig) -> bool {
+    matches!(
+        config.video_codec.as_str(),
+        "libx264" | "libx265" | "h264_nvenc" | "hevc_nvenc"
+    )
+}
+
+/// 组次标题：贴在次级标题左线上，标题比常规字段标签亮一档（与备注拉开层级），
+/// 备注小一号紧跟在标题后。三族在「感知优化」节里占同一个槽位，避免切编码器时标题层缺失。
+fn settings_video_group_label(
+    label: &'static str,
+    remark: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_2()
+        .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
+        .child(settings_video_field_label_secondary(label, palette))
+        .child(settings_hint_text(remark, palette))
+}
+
+/// psy 字段列：标签贴在次级标题左线上，输入框保持列左缘（缩进只作用于标题）。
+/// 占位写的是编码器默认值提示（如「2.0（跟随默认）」），斜体＋降档由输入组件按 kind 处理。
+fn settings_video_psy_column(
+    label: &'static str,
+    spec: FrameTextInputSpec<'_>,
+    palette: &'static theme::ThemePalette,
+    window: &Window,
+    cx: &Context<FrameRoot>,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(
+            div()
+                .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
+                .child(settings_video_field_label_tertiary(label, palette)),
+        )
+        .child(frame_text_input(spec, palette, window, cx))
+}
+
+/// 感知优化（策略型 UI：软编只暴露 `psy-rd`／`psy-rdoq`，NVENC 只暴露空间/时间 AQ，
+/// 其余跟随编码器默认）。psy 与率控正交，恒定质量/目标码率档都生效。
+#[expect(
+    clippy::too_many_lines,
+    reason = "The three encoder families share one slot in this section; splitting the match into separate builders would scatter the parity that the section exists to guarantee."
+)]
+fn settings_video_perception_section(
     config: &ConversionConfig,
     settings_disabled: bool,
     focuses: SettingsVideoInputFocuses<'_>,
     palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
+    window: &Window,
+    cx: &Context<FrameRoot>,
 ) -> gpui::Div {
-    let mut section = settings_section("心理视觉优化", palette);
+    let mut section = settings_video_section("感知优化", palette);
     match config.video_codec.as_str() {
         "libx264" => {
             section = section
-                .child(settings_video_checkbox_row(
-                    "video-x264-psy",
+                .child(settings_video_group_label(
                     "心理视觉优化",
-                    "默认跟随编码器开启；取消勾选＝发 psy=0，客观指标优先",
-                    !config.x264_disable_psy,
-                    settings_disabled,
+                    "默认跟随编码器开启",
                     palette,
-                    cx,
-                    move |root, _event, _window, cx| {
-                        if settings_disabled {
-                            return;
-                        }
-                        if root.update_selected_config(|config| {
-                            apply_x264_disable_psy(config, !config.x264_disable_psy)
-                        }) {
-                            cx.notify();
-                        }
-                    },
                 ))
-                .when(!config.x264_disable_psy, |this| {
-                    this.child(settings_field_label(
-                        "心理视觉强度 psy-rd（0–10，空 = 跟随默认 1.0）",
-                        palette,
-                    ))
-                    .child(frame_text_input(
-                        FrameTextInputSpec {
-                            id: "settings-video-x264-psy-rd-field",
-                            value: &config.x264_psy_rd,
-                            placeholder: "1.0",
-                            disabled: settings_disabled,
-                            focus: focuses.x264_psy_rd,
-                            kind: FrameTextInputKind::VideoX264PsyRd,
-                        },
-                        palette,
-                        window,
-                        cx,
-                    ))
-                });
+                .child(
+                    div()
+                        .grid()
+                        .grid_cols(2)
+                        .gap_2()
+                        .child(settings_video_psy_column(
+                            "强度 psy-rd（0–10）",
+                            FrameTextInputSpec {
+                                id: "settings-video-x264-psy-rd-field",
+                                value: &config.x264_psy_rd,
+                                placeholder: "1.0（跟随默认）",
+                                disabled: settings_disabled,
+                                focus: focuses.x264_psy_rd,
+                                kind: FrameTextInputKind::VideoX264PsyRd,
+                            },
+                            palette,
+                            window,
+                            cx,
+                        )),
+                );
         }
         "libx265" => {
             section = section
-                .child(settings_field_label(
-                    "心理视觉强度 psy-rd（0–5，空 = 跟随默认 2.0）",
+                .child(settings_video_group_label(
+                    "心理视觉优化",
+                    "默认跟随编码器开启",
                     palette,
                 ))
-                .child(frame_text_input(
-                    FrameTextInputSpec {
-                        id: "settings-video-x265-psy-rd-field",
-                        value: &config.x265_psy_rd,
-                        placeholder: "2.0",
-                        disabled: settings_disabled,
-                        focus: focuses.x265_psy_rd,
-                        kind: FrameTextInputKind::VideoX265PsyRd,
-                    },
+                .child(
+                    div()
+                        .grid()
+                        .grid_cols(2)
+                        .gap_2()
+                        .child(settings_video_psy_column(
+                            "强度 psy-rd（0–5）",
+                            FrameTextInputSpec {
+                                id: "settings-video-x265-psy-rd-field",
+                                value: &config.x265_psy_rd,
+                                placeholder: "2.0（跟随默认）",
+                                disabled: settings_disabled,
+                                focus: focuses.x265_psy_rd,
+                                kind: FrameTextInputKind::VideoX265PsyRd,
+                            },
+                            palette,
+                            window,
+                            cx,
+                        ))
+                        .child(settings_video_psy_column(
+                            "量化 psy-rdoq（0–60）",
+                            FrameTextInputSpec {
+                                id: "settings-video-x265-psy-rdoq-field",
+                                value: &config.x265_psy_rdoq,
+                                placeholder: "0（跟随默认）",
+                                disabled: settings_disabled,
+                                focus: focuses.x265_psy_rdoq,
+                                kind: FrameTextInputKind::VideoX265PsyRdoq,
+                            },
+                            palette,
+                            window,
+                            cx,
+                        )),
+                );
+        }
+        "h264_nvenc" | "hevc_nvenc" => {
+            // 空间/时间 AQ 仅 H.264/HEVC NVENC 支持；av1_nvenc 不暴露
+            // `-spatial_aq`/`-temporal_aq`（程序自带 ffmpeg 8.1.2-50 实测）。
+            section = section
+                .child(settings_video_group_label(
+                    "自适应量化",
+                    "默认关闭",
                     palette,
-                    window,
-                    cx,
                 ))
-                .child(settings_field_label(
-                    "心理视觉量化 psy-rdoq（0–60，空 = 跟随默认 0）",
-                    palette,
-                ))
-                .child(frame_text_input(
-                    FrameTextInputSpec {
-                        id: "settings-video-x265-psy-rdoq-field",
-                        value: &config.x265_psy_rdoq,
-                        placeholder: "0",
-                        disabled: settings_disabled,
-                        focus: focuses.x265_psy_rdoq,
-                        kind: FrameTextInputKind::VideoX265PsyRdoq,
-                    },
-                    palette,
-                    window,
-                    cx,
-                ));
+                .child(
+                    div()
+                        .grid()
+                        .grid_cols(2)
+                        .gap_2()
+                        .child(settings_video_checkbox_row(
+                            "video-nvenc-spatial-aq",
+                            "空间 AQ",
+                            "提升复杂场景细节",
+                            config.nvenc_spatial_aq,
+                            settings_disabled,
+                            palette,
+                            cx,
+                            move |root, _event, _window, cx| {
+                                if settings_disabled {
+                                    return;
+                                }
+                                if root.update_selected_config(|config| {
+                                    apply_nvenc_spatial_aq(config, !config.nvenc_spatial_aq)
+                                }) {
+                                    cx.notify();
+                                }
+                            },
+                        ))
+                        .child(
+                            div()
+                                .flex()
+                                .justify_end()
+                                .mr(theme::ui_rem(VIDEO_AQ_RIGHT_PULL))
+                                .child(settings_video_checkbox_row(
+                                    "video-nvenc-temporal-aq",
+                                    "时间 AQ",
+                                    "稳定帧间质量",
+                                    config.nvenc_temporal_aq,
+                                    settings_disabled,
+                                    palette,
+                                    cx,
+                                    move |root, _event, _window, cx| {
+                                        if settings_disabled {
+                                            return;
+                                        }
+                                        if root.update_selected_config(|config| {
+                                            apply_nvenc_temporal_aq(
+                                                config,
+                                                !config.nvenc_temporal_aq,
+                                            )
+                                        }) {
+                                            cx.notify();
+                                        }
+                                    },
+                                )),
+                        ),
+                );
         }
         _ => {}
     }
@@ -1067,6 +1203,7 @@ fn settings_video_range_field(
     lower_label: &'static str,
     upper_label: &'static str,
     target: SettingsVideoRangeTarget,
+    reversed: bool,
     disabled: bool,
     palette: &'static theme::ThemePalette,
     cx: &Context<FrameRoot>,
@@ -1081,11 +1218,15 @@ fn settings_video_range_field(
                 .flex()
                 .items_end()
                 .justify_between()
-                .child(settings_field_label(label, palette))
+                .child(
+                    div()
+                        .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
+                        .child(settings_video_field_label_secondary(label, palette)),
+                )
                 .child(settings_value_badge(value_label, palette)),
         )
         .child(settings_video_range_slider(
-            value, min, max, disabled, target, palette, cx,
+            value, min, max, reversed, disabled, target, palette, cx,
         ))
         .child(
             div()
@@ -1098,19 +1239,53 @@ fn settings_video_range_field(
         )
 }
 
+/// 把按键名按显示方向镜像：反向滑条的「右」是数值变小的一端。
+/// 未知按键归一为空串（`range_value_for_key` 本就拒收），故返回值恒为 `'static`。
+fn range_key_for_display_direction(key: &str, reversed: bool) -> &'static str {
+    let (forward, backward) = match key {
+        "left" => ("left", "right"),
+        "right" => ("right", "left"),
+        "up" => ("up", "down"),
+        "down" => ("down", "up"),
+        "pageup" => ("pageup", "pagedown"),
+        "pagedown" => ("pagedown", "pageup"),
+        "home" => ("home", "end"),
+        "end" => ("end", "home"),
+        _ => return "",
+    };
+    if reversed { backward } else { forward }
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The slider keeps value, bounds, direction, state, target, palette, and context explicit at its single call site."
+)]
 fn settings_video_range_slider(
     value: u32,
     min: u32,
     max: u32,
+    reversed: bool,
     disabled: bool,
     target: SettingsVideoRangeTarget,
     palette: &'static theme::ThemePalette,
     cx: &Context<FrameRoot>,
 ) -> gpui::Stateful<gpui::Div> {
-    let fraction = range_fraction(value, min, max);
-    let drag = SettingsVideoRangeDrag { target, min, max };
+    let raw_fraction = range_fraction(value, min, max);
+    let fraction = if reversed {
+        1.0 - raw_fraction
+    } else {
+        raw_fraction
+    };
+    let drag = SettingsVideoRangeDrag {
+        target,
+        min,
+        max,
+        reversed,
+    };
     let owner = cx.entity();
     let decrement_owner = owner.clone();
+    let increment_key = range_key_for_display_direction("right", reversed);
+    let decrement_key = range_key_for_display_direction("left", reversed);
 
     frame_slider(
         match target {
@@ -1130,7 +1305,7 @@ fn settings_video_range_slider(
             return;
         }
         owner.update(cx, move |root, cx| {
-            if let Some(value) = range_value_for_key(value, min, max, "right")
+            if let Some(value) = range_value_for_key(value, min, max, increment_key)
                 && root.update_selected_config(|config| {
                     apply_settings_video_range_value(config, target, value)
                 })
@@ -1144,7 +1319,7 @@ fn settings_video_range_slider(
             return;
         }
         decrement_owner.update(cx, move |root, cx| {
-            if let Some(value) = range_value_for_key(value, min, max, "left")
+            if let Some(value) = range_value_for_key(value, min, max, decrement_key)
                 && root.update_selected_config(|config| {
                     apply_settings_video_range_value(config, target, value)
                 })
@@ -1162,6 +1337,11 @@ fn settings_video_range_slider(
         |root, event: &DragMoveEvent<SettingsVideoRangeDrag>, _window, cx| {
             let drag = *event.drag(cx);
             let fraction = timeline_slider_percent_from_bounds(event.event.position, event.bounds);
+            let fraction = if drag.reversed {
+                1.0 - fraction
+            } else {
+                fraction
+            };
             let value = range_value_from_fraction(fraction, drag.min, drag.max);
             let changed = root.update_selected_config(|config| {
                 apply_settings_video_range_value(config, drag.target, value)
@@ -1173,8 +1353,8 @@ fn settings_video_range_slider(
     ))
     .on_key_down(
         cx.listener(move |root, event: &gpui::KeyDownEvent, _window, cx| {
-            let Some(value) = range_value_for_key(value, min, max, event.keystroke.key.as_str())
-            else {
+            let key = range_key_for_display_direction(&event.keystroke.key, reversed);
+            let Some(value) = range_value_for_key(value, min, max, key) else {
                 return;
             };
             if root.update_selected_config(|config| {
@@ -1222,24 +1402,74 @@ fn settings_video_range_handle(
     }
 }
 
-fn settings_video_nvenc_section(
+/// 「多遍与前瞻」节可见性：软编两遍只在目标码率档有意义（恒定质量没有码率目标可
+/// 分配）；NVENC 的预看帧数两种模式都生效，故 NVENC 恒可见。
+fn settings_video_multipass_visible(config: &ConversionConfig) -> bool {
+    if is_nvenc_video_codec(&config.video_codec) {
+        return true;
+    }
+    frame_core::twopass::is_supported(&config.video_codec)
+        && config.video_bitrate_mode == "bitrate"
+}
+
+/// 多遍与前瞻：同族决策＝先分析、再编码。软编是两遍统计（x265 另有两项精炼），
+/// NVENC 是预看帧数（`-rc-lookahead`）与多遍分析（`-multipass`）。
+#[expect(
+    clippy::too_many_lines,
+    reason = "Software two-pass and NVENC lookahead/multipass share one section on purpose; splitting them would break the slot parity across encoders."
+)]
+fn settings_video_multipass_section(
     config: &ConversionConfig,
     disabled: bool,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    settings_section("NVENC 选项", palette)
-        // 空间/时间 AQ 仅 H.264/HEVC NVENC 支持；av1_nvenc 不暴露 -spatial_aq/-temporal_aq
-        // （程序自带 ffmpeg 8.1.2-50 实测），故 av1 不显示这两项；预看帧数/多遍分析仍照给。
+    let section = settings_video_section("多遍与前瞻", palette);
+    if is_nvenc_video_codec(&config.video_codec) {
+        return section.child(
+            div()
+                .grid()
+                .grid_cols(2)
+                .gap_2()
+                .child(settings_video_nvenc_lookahead_column(
+                    config, disabled, palette, window, cx,
+                ))
+                .when(config.video_bitrate_mode == "bitrate", |this| {
+                    this.child(settings_video_nvenc_multipass_column(
+                        config, disabled, palette, window, cx,
+                    ))
+                }),
+        );
+    }
+    section
+        .child(settings_video_checkbox_row(
+            "video-two-pass",
+            "两遍编码",
+            "先统计整片再分配码率，命中更准，耗时翻倍",
+            config.video_two_pass,
+            disabled,
+            palette,
+            cx,
+            move |root, _event, _window, cx| {
+                if disabled {
+                    return;
+                }
+                if root.update_selected_config(|config| {
+                    apply_video_two_pass(config, !config.video_two_pass)
+                }) {
+                    cx.notify();
+                }
+            },
+        ))
         .when(
-            matches!(config.video_codec.as_str(), "h264_nvenc" | "hevc_nvenc"),
+            config.video_codec == "libx265" && config.video_two_pass,
             |this| {
                 this.child(settings_video_checkbox_row(
-                    "video-nvenc-spatial-aq",
-                    "空间 AQ",
-                    "提升高复杂度场景的细节",
-                    config.nvenc_spatial_aq,
+                    "video-x265-analysis-refinement",
+                    "分析精炼",
+                    "附加·首遍多存分析信息，次遍决策更准、更耗时",
+                    config.x265_multipass_opt_analysis,
                     disabled,
                     palette,
                     cx,
@@ -1248,17 +1478,20 @@ fn settings_video_nvenc_section(
                             return;
                         }
                         if root.update_selected_config(|config| {
-                            apply_nvenc_spatial_aq(config, !config.nvenc_spatial_aq)
+                            apply_x265_multipass_opt_analysis(
+                                config,
+                                !config.x265_multipass_opt_analysis,
+                            )
                         }) {
                             cx.notify();
                         }
                     },
                 ))
                 .child(settings_video_checkbox_row(
-                    "video-nvenc-temporal-aq",
-                    "时间 AQ",
-                    "稳定帧间质量",
-                    config.nvenc_temporal_aq,
+                    "video-x265-distortion-refinement",
+                    "畸变精炼",
+                    "附加·首遍多存失真信息，次遍码率分配更准、更耗时",
+                    config.x265_multipass_opt_distortion,
                     disabled,
                     palette,
                     cx,
@@ -1267,7 +1500,10 @@ fn settings_video_nvenc_section(
                             return;
                         }
                         if root.update_selected_config(|config| {
-                            apply_nvenc_temporal_aq(config, !config.nvenc_temporal_aq)
+                            apply_x265_multipass_opt_distortion(
+                                config,
+                                !config.x265_multipass_opt_distortion,
+                            )
                         }) {
                             cx.notify();
                         }
@@ -1275,141 +1511,188 @@ fn settings_video_nvenc_section(
                 ))
             },
         )
+}
+
+/// NVENC 预看帧数档位（`-rc-lookahead`）。内切框按此顺序循环：关闭 → 20 → 40 → 关闭。
+const NVENC_LOOKAHEAD_OPTIONS: [(u32, &str); 3] = [(0, "关闭"), (20, "20 帧"), (40, "40 帧")];
+
+/// NVENC 多遍分析档位（`-multipass`）。内切框按此顺序循环。
+const NVENC_MULTIPASS_OPTIONS: [(&str, &str); 3] = [
+    ("disabled", "关闭"),
+    ("qres", "1/4 分辨率"),
+    ("fullres", "全分辨率"),
+];
+
+fn nvenc_lookahead_label(frames: u32) -> &'static str {
+    NVENC_LOOKAHEAD_OPTIONS
+        .iter()
+        .find(|(value, _)| *value == frames)
+        .map_or(NVENC_LOOKAHEAD_OPTIONS[0].1, |(_, label)| label)
+}
+
+/// 表外值直接落回首档，保证点一下总能回到已知状态。
+fn next_nvenc_lookahead(frames: u32) -> u32 {
+    let index = NVENC_LOOKAHEAD_OPTIONS
+        .iter()
+        .position(|(value, _)| *value == frames);
+    match index {
+        Some(index) => NVENC_LOOKAHEAD_OPTIONS[(index + 1) % NVENC_LOOKAHEAD_OPTIONS.len()].0,
+        None => NVENC_LOOKAHEAD_OPTIONS[0].0,
+    }
+}
+
+fn nvenc_multipass_label(mode: &str) -> &'static str {
+    NVENC_MULTIPASS_OPTIONS
+        .iter()
+        .find(|(value, _)| *value == mode)
+        .map_or(NVENC_MULTIPASS_OPTIONS[0].1, |(_, label)| label)
+}
+
+fn next_nvenc_multipass(mode: &str) -> &'static str {
+    let index = NVENC_MULTIPASS_OPTIONS
+        .iter()
+        .position(|(value, _)| *value == mode);
+    match index {
+        Some(index) => NVENC_MULTIPASS_OPTIONS[(index + 1) % NVENC_MULTIPASS_OPTIONS.len()].0,
+        None => NVENC_MULTIPASS_OPTIONS[0].0,
+    }
+}
+
+/// 内切档框：显示当前档，点一下就地切到下一档。单框换横向空间，代价是其余档位不再
+/// 并列可见 ⇒ 由标签行的小字备注补回，并在可见文字两侧加三角提示“可点着切”。
+/// 选中态当状态灯用：`selected`＝当前档非默认（不是「关闭」）时高亮，关闭档保持普通
+/// 灰底。三角只上界面：无障碍名保持「组名，当前 某档」，不念符号、也不报 pressed
+/// （三档循环不是二态开关，报 pressed 会误导）。
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The cycle box keeps identity, accessible group, current label, active state, enabled state, palette, render context, and the advance step explicit."
+)]
+fn settings_video_cycle_box(
+    id: &'static str,
+    group: &'static str,
+    display: &'static str,
+    selected: bool,
+    enabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+    advance: fn(&mut ConversionConfig) -> bool,
+) -> gpui::Stateful<gpui::Div> {
+    apply_accessible_button(
+        frame_text_button(
+            id,
+            format!("◂  {display}  ▸"),
+            ButtonVariant::Secondary,
+            selected,
+            enabled,
+            palette,
+            window,
+            cx,
+        )
+        .w_full(),
+        format!("{group}，当前 {display}"),
+        enabled,
+        palette,
+    )
+    .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+        cx.stop_propagation();
+        if !enabled {
+            return;
+        }
+        if root.update_selected_config(advance) {
+            cx.notify();
+        }
+    }))
+}
+
+/// 预看帧数列：标签行小字列出默认之外的档位，框内切，说明在列底。
+fn settings_video_nvenc_lookahead_column(
+    config: &ConversionConfig,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(settings_video_group_label(
+            "预看帧数",
+            "20 帧、40 帧",
+            palette,
+        ))
+        .child(settings_video_cycle_box(
+            "video-nvenc-lookahead-cycle",
+            "预看帧数",
+            nvenc_lookahead_label(config.nvenc_rc_lookahead),
+            config.nvenc_rc_lookahead != 0,
+            !disabled,
+            palette,
+            window,
+            cx,
+            |config| {
+                apply_nvenc_rc_lookahead(config, next_nvenc_lookahead(config.nvenc_rc_lookahead))
+            },
+        ))
         .child(
             div()
-                .flex()
-                .flex_col()
-                .gap_2()
-                .pt(theme::ui_rem(4.0))
-                .child(settings_field_label("预看帧数", palette))
-                .child(settings_video_nvenc_lookahead_grid(
-                    config, disabled, palette, window, cx,
-                ))
+                .ml(theme::ui_rem(VIDEO_REMARK_GAP))
+                .child(settings_hint_text("提前分析后续帧，更准但更耗时", palette)),
+        )
+}
+
+/// 多遍分析列：同上，档位为 1/4 分辨率与全分辨率。
+fn settings_video_nvenc_multipass_column(
+    config: &ConversionConfig,
+    disabled: bool,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .child(settings_video_group_label(
+            "多遍分析",
+            "1/4 分辨率、全分辨率",
+            palette,
+        ))
+        .child(settings_video_cycle_box(
+            "video-nvenc-multipass-cycle",
+            "多遍分析",
+            nvenc_multipass_label(&config.nvenc_multipass),
+            config.nvenc_multipass != "disabled",
+            !disabled,
+            palette,
+            window,
+            cx,
+            |config| {
+                let next = next_nvenc_multipass(&config.nvenc_multipass);
+                apply_nvenc_multipass(config, next)
+            },
+        ))
+        .child(
+            div()
+                .ml(theme::ui_rem(VIDEO_REMARK_GAP))
+                .whitespace_nowrap()
                 .child(settings_hint_text(
-                    "提前分析后续帧以改善码率与帧类型决策，会增加耗时。",
+                    "先预分析再编码,收益小,因内容而异",
                     palette,
                 )),
         )
-        .when(config.video_bitrate_mode == "bitrate", |this| {
-            this.child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .pt(theme::ui_rem(4.0))
-                    .child(settings_field_label("多遍分析", palette))
-                    .child(settings_video_nvenc_multipass_grid(
-                        config, disabled, palette, window, cx,
-                    ))
-                    .child(settings_hint_text(
-                        "先做一遍预分析再正式编码，把码率用在画面更需要的地方；收益很小、因内容而异，且会增加耗时。",
-                        palette,
-                    )),
-            )
-        })
 }
 
-fn settings_video_nvenc_multipass_grid(
-    config: &ConversionConfig,
-    disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut grid = div().grid().grid_cols(3).gap_2();
-    for (mode, label) in [
-        ("disabled", "关闭"),
-        ("qres", "1/4 分辨率"),
-        ("fullres", "全分辨率"),
-    ] {
-        grid = grid.child(
-            frame_choice_button(
-                format!("video-nvenc-multipass-{mode}"),
-                label,
-                config.nvenc_multipass == mode,
-                !disabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_nvenc_multipass(config, mode)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-    grid
-}
-
-fn settings_video_nvenc_lookahead_grid(
-    config: &ConversionConfig,
-    disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut grid = div().grid().grid_cols(3).gap_2();
-    for (frames, label) in [(0_u32, "关闭"), (20, "20 帧"), (40, "40 帧")] {
-        grid = grid.child(
-            frame_choice_button(
-                format!("video-nvenc-lookahead-{frames}"),
-                label,
-                config.nvenc_rc_lookahead == frames,
-                !disabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if disabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_nvenc_rc_lookahead(config, frames)) {
-                    cx.notify();
-                }
-            })),
-        );
-    }
-    grid
-}
-
-fn settings_video_videotoolbox_section(
-    config: &ConversionConfig,
-    disabled: bool,
-    palette: &'static theme::ThemePalette,
-    cx: &Context<FrameRoot>,
-) -> gpui::Div {
-    settings_section("VideoToolbox 选项", palette).child(settings_video_checkbox_row(
-        "video-videotoolbox-allow-sw",
-        "允许软件回退",
-        "硬件失败时回退到 CPU 编码",
-        config.videotoolbox_allow_sw,
-        disabled,
-        palette,
-        cx,
-        move |root, _event, _window, cx| {
-            if disabled {
-                return;
-            }
-            if root.update_selected_config(|config| {
-                apply_videotoolbox_allow_sw(config, !config.videotoolbox_allow_sw)
-            }) {
-                cx.notify();
-            }
-        },
-    ))
-}
-
+#[expect(
+    clippy::fn_params_excessive_bools,
+    reason = "Each bool is an independent capability gate (panel disabled, hardware encoder selected, software fallback offered, decode backend present); collapsing them into one enum would lose combinations."
+)]
 fn settings_video_hw_section(
     config: &ConversionConfig,
     disabled: bool,
     hardware_encoder: bool,
+    software_fallback: bool,
     backend_available: bool,
     palette: &'static theme::ThemePalette,
     cx: &Context<FrameRoot>,
@@ -1430,23 +1713,48 @@ fn settings_video_hw_section(
     };
     let row_disabled = disabled || !backend_available;
 
-    settings_section(section_title, palette).child(settings_video_checkbox_row(
-        "video-hw-decode",
-        "硬件解码",
-        hint,
-        config.hw_decode,
-        row_disabled,
-        palette,
-        cx,
-        move |root, _event, _window, cx| {
-            if row_disabled {
-                return;
-            }
-            if root.update_selected_config(|config| apply_hw_decode(config, !config.hw_decode)) {
-                cx.notify();
-            }
-        },
-    ))
+    settings_video_section(section_title, palette)
+        .child(settings_video_checkbox_row(
+            "video-hw-decode",
+            "硬件解码",
+            hint,
+            config.hw_decode,
+            row_disabled,
+            palette,
+            cx,
+            move |root, _event, _window, cx| {
+                if row_disabled {
+                    return;
+                }
+                if root.update_selected_config(|config| apply_hw_decode(config, !config.hw_decode))
+                {
+                    cx.notify();
+                }
+            },
+        ))
+        // VideoToolbox 独有的兜底开关：讲的还是这条硬件管线怎么用，故并进本节，
+        // 不再为它单开一节（重组后它在其它节里没有任何内容）。
+        .when(software_fallback, |this| {
+            this.child(settings_video_checkbox_row(
+                "video-videotoolbox-allow-sw",
+                "允许软件回退",
+                "硬件失败时回退到 CPU 编码",
+                config.videotoolbox_allow_sw,
+                disabled,
+                palette,
+                cx,
+                move |root, _event, _window, cx| {
+                    if disabled {
+                        return;
+                    }
+                    if root.update_selected_config(|config| {
+                        apply_videotoolbox_allow_sw(config, !config.videotoolbox_allow_sw)
+                    }) {
+                        cx.notify();
+                    }
+                },
+            ))
+        })
 }
 
 #[expect(
@@ -1513,6 +1821,25 @@ mod tests {
             video_codec: codec.to_string(),
             ..ConversionConfig::default()
         }
+    }
+
+    #[test]
+    fn lookahead_cycle_wraps_back_to_off() {
+        assert_eq!(next_nvenc_lookahead(0), 20);
+        assert_eq!(next_nvenc_lookahead(20), 40);
+        assert_eq!(next_nvenc_lookahead(40), 0, "末档点一下回到关闭");
+        assert_eq!(next_nvenc_lookahead(7), 0, "表外值回落首档");
+        assert_eq!(nvenc_lookahead_label(20), "20 帧");
+        assert_eq!(nvenc_lookahead_label(7), "关闭");
+    }
+
+    #[test]
+    fn multipass_cycle_wraps_back_to_off() {
+        assert_eq!(next_nvenc_multipass("disabled"), "qres");
+        assert_eq!(next_nvenc_multipass("qres"), "fullres");
+        assert_eq!(next_nvenc_multipass("fullres"), "disabled");
+        assert_eq!(next_nvenc_multipass(""), "disabled");
+        assert_eq!(nvenc_multipass_label("qres"), "1/4 分辨率");
     }
 
     #[test]

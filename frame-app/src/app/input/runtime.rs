@@ -132,6 +132,15 @@ impl FrameTextInputKind {
                 | Self::MetadataServiceProvider
         )
     }
+
+    /// 心理视觉（psy）三个数值字段：占位写的是「默认值（跟随默认）」这类提示，
+    /// 因此渲染成斜体且比常规占位再淡一档。字号随正文，不与元数据页共用小一号。
+    pub(in crate::app) const fn is_psy_field(self) -> bool {
+        matches!(
+            self,
+            Self::VideoX264PsyRd | Self::VideoX265PsyRd | Self::VideoX265PsyRdoq
+        )
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

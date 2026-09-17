@@ -14,16 +14,14 @@ pub(in crate::app) fn settings_field_label(
         .child(theme::ui_text(label))
 }
 
-/// 元数据页字段标签亮度：介于 `text_muted`（深色≈α0.52）与节标题（α0.80）之间。
-/// 单行常数，供逐轮微调。
-const FIELD_LABEL_EMPHASIS_ALPHA: f32 = 0.62;
-
+/// 次级标题亮度：介于 `text_muted`（深色≈α0.52）与节标题（α0.80）之间一档。
+/// 系数由 `theme::TEXT_EMPHASIS_ALPHA` 单点控制，复选框行标题共用。
 pub(in crate::app) fn settings_field_label_emphasized(
     label: &'static str,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Div {
     let mut text_color = color(palette.text_primary);
-    text_color.a *= FIELD_LABEL_EMPHASIS_ALPHA;
+    text_color.a *= theme::TEXT_EMPHASIS_ALPHA;
     div()
         .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
         .font_weight(theme::TEXT_WEIGHT_MEDIUM)
@@ -54,10 +52,8 @@ pub(in crate::app) fn settings_hint_text(
     text: &'static str,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Div {
-    const SETTINGS_HINT_TEXT_SIZE: f32 = 11.0;
-
     div()
-        .text_size(theme::ui_rem(SETTINGS_HINT_TEXT_SIZE))
+        .text_size(theme::ui_rem(theme::TEXT_HINT_SIZE))
         .text_color(color(palette.text_muted))
         .child(theme::ui_text(text))
 }

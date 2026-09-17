@@ -1583,7 +1583,6 @@ fn base_config(container: &str, video_codec: &str) -> ConversionConfig {
         nvenc_multipass: "disabled".to_string(),
         x265_multipass_opt_analysis: false,
         x265_multipass_opt_distortion: false,
-        x264_disable_psy: false,
         x264_psy_rd: String::new(),
         x265_psy_rd: String::new(),
         x265_psy_rdoq: String::new(),

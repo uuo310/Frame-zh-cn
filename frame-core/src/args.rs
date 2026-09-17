@@ -777,11 +777,7 @@ pub fn build_ffmpeg_args_with_hwaccel(
     }
 
     // -x264-params：psy（率控无关）。
-    if let Some(x264_params) = psy::x264_params(
-        &config.video_codec,
-        config.x264_disable_psy,
-        &config.x264_psy_rd,
-    ) {
+    if let Some(x264_params) = psy::x264_params(&config.video_codec, &config.x264_psy_rd) {
         args.push("-x264-params".to_string());
         args.push(x264_params);
     }
@@ -1636,7 +1632,6 @@ mod tests {
             nvenc_multipass: "disabled".to_string(),
             x265_multipass_opt_analysis: false,
             x265_multipass_opt_distortion: false,
-            x264_disable_psy: false,
             x264_psy_rd: String::new(),
             x265_psy_rd: String::new(),
             x265_psy_rdoq: String::new(),
@@ -2253,17 +2248,6 @@ mod tests {
         assert!(
             args_contains_pair(&args, "-x264-params", "psy-rd=2"),
             "x264 psy 应合并为一条 -x264-params：{args:?}"
-        );
-
-        // x264 总开关关闭：只发 psy=0，并抑制 psy-rd（冲突裁决）
-        let mut nopsy = sample_config("mp4", "libx264");
-        nopsy.video_bitrate_mode = "crf".to_string();
-        nopsy.x264_disable_psy = true;
-        nopsy.x264_psy_rd = "2".to_string();
-        let args = build_ffmpeg_args("in.mp4", "out.mp4", &nopsy, &sample_probe()).unwrap();
-        assert!(
-            args_contains_pair(&args, "-x264-params", "psy=0"),
-            "总开关关闭应只发 psy=0：{args:?}"
         );
 
         // 默认全空：一个 params 参数都不发（与既有行为逐字节一致）

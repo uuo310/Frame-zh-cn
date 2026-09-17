@@ -5,6 +5,8 @@ pub(super) struct FrameTextInputElement {
     kind: FrameTextInputKind,
     placeholder: SharedString,
     disabled: bool,
+    /// 占位提示再淡一档（psy 字段的「默认值（跟随默认）」）；不影响真实输入值。
+    dimmed_placeholder: bool,
     focus_handle: FocusHandle,
     palette: &'static theme::ThemePalette,
 }
@@ -89,7 +91,11 @@ impl Element for FrameTextInputElement {
             content.into()
         };
         let mut style = window.text_style();
-        style.color = if is_placeholder || self.disabled {
+        style.color = if is_placeholder && self.dimmed_placeholder && !self.disabled {
+            let mut hint = color(self.palette.text_muted);
+            hint.a *= PLACEHOLDER_HINT_ALPHA_FACTOR;
+            hint.into()
+        } else if is_placeholder || self.disabled {
             color(self.palette.text_muted).into()
         } else {
             color(self.palette.text_primary).into()
@@ -239,6 +245,9 @@ pub(in crate::app) struct FrameTextInputSpec<'a> {
 /// 元数据页提示（占位）文字字号（设计像素）：比常规输入文字小一号；仅提示，输入值不变。单行常数逐轮微调。
 const METADATA_HINT_TEXT_SIZE_PX: f32 = 11.0;
 
+/// 提示型占位（psy 的「默认值（跟随默认）」）在常规占位灰度上的再降档系数。单行常数逐轮微调。
+const PLACEHOLDER_HINT_ALPHA_FACTOR: f32 = 0.72;
+
 #[expect(
     clippy::too_many_lines,
     reason = "The GPUI text input element keeps interaction handlers in one builder for predictable focus behavior."
@@ -259,15 +268,23 @@ pub(in crate::app) fn frame_text_input(
     } = spec;
     let is_placeholder = value.is_empty();
     let metadata_hint = kind.is_metadata_field() && is_placeholder;
+    // psy 的占位写的是默认值提示：与元数据提示同样斜体，但字号随正文，只把灰度再降一档。
+    let psy_hint = kind.is_psy_field() && is_placeholder;
+    let dimmed_placeholder = psy_hint && !disabled;
+    let italic_placeholder = metadata_hint || psy_hint;
     let label = if is_placeholder {
         theme::ui_text(placeholder)
     } else {
         value.to_string()
     };
-    let label_color = if disabled || is_placeholder {
-        palette.text_muted
+    let label_color = if dimmed_placeholder {
+        let mut hint = color(palette.text_muted);
+        hint.a *= PLACEHOLDER_HINT_ALPHA_FACTOR;
+        hint
+    } else if disabled || is_placeholder {
+        color(palette.text_muted)
     } else {
-        palette.text_primary
+        color(palette.text_primary)
     };
 
     let mut field = div()
@@ -285,7 +302,7 @@ pub(in crate::app) fn frame_text_input(
         } else {
             theme::TEXT_UI_BASE_SIZE
         }))
-        .text_color(color(label_color))
+        .text_color(label_color)
         .opacity(if disabled { 0.5 } else { 1.0 })
         .shadow(input_highlight_shadows(palette))
         .key_context(if kind.is_preview_timecode() {
@@ -295,7 +312,7 @@ pub(in crate::app) fn frame_text_input(
         })
         .when(!disabled, gpui::Styled::cursor_text)
         .when(disabled, gpui::Styled::cursor_not_allowed)
-        .when(metadata_hint, gpui::Styled::italic)
+        .when(italic_placeholder, gpui::Styled::italic)
         .when(!disabled, |this| {
             this.on_action(cx.listener(FrameRoot::text_input_backspace))
                 .on_action(cx.listener(FrameRoot::text_input_delete))
@@ -361,6 +378,7 @@ pub(in crate::app) fn frame_text_input(
             kind,
             placeholder: SharedString::from(placeholder),
             disabled,
+            dimmed_placeholder,
             focus_handle: focus,
             palette,
         });
