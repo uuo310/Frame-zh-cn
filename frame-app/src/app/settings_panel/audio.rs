@@ -183,32 +183,36 @@ fn settings_audio_encoding_controls(
             } else {
                 "最佳"
             };
-            controls = controls.child(settings_audio_range_field(
-                SettingsAudioRangeSpec {
-                    label: "Quality level",
-                    value_label: format!("Q {value}"),
-                    value,
-                    min: range.min,
-                    max: range.max,
-                    lower_label,
-                    upper_label,
-                    target: SettingsAudioRangeTarget::Quality,
-                },
-                controls_disabled,
-                palette,
-                cx,
-            ));
+            controls = controls.child(settings_audio_field_divider(palette)).child(
+                settings_audio_range_field(
+                    SettingsAudioRangeSpec {
+                        label: "质量等级",
+                        value_label: format!("Q {value}"),
+                        value,
+                        min: range.min,
+                        max: range.max,
+                        lower_label,
+                        upper_label,
+                        target: SettingsAudioRangeTarget::Quality,
+                    },
+                    controls_disabled,
+                    palette,
+                    cx,
+                ),
+            );
         }
     } else {
-        controls = controls.child(settings_audio_bitrate_field(
-            config,
-            controls_disabled || is_lossless,
-            is_lossless,
-            audio_bitrate_focus,
-            palette,
-            window,
-            cx,
-        ));
+        controls = controls.child(settings_audio_field_divider(palette)).child(
+            settings_audio_bitrate_field(
+                config,
+                controls_disabled || is_lossless,
+                is_lossless,
+                audio_bitrate_focus,
+                palette,
+                window,
+                cx,
+            ),
+        );
     }
 
     controls
@@ -222,7 +226,10 @@ fn settings_audio_bitrate_mode_grid(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let mut grid = div().grid().grid_cols(2).gap_2();
-    for (mode, label) in [("bitrate", "目标码率"), ("vbr", "可变码率")] {
+    for (mode, label, badge) in [
+        ("bitrate", "目标码率", None),
+        ("vbr", "可变码率", Some("VBR")),
+    ] {
         let selected = config.audio_bitrate_mode == mode;
         let enabled =
             !disabled && (mode == "bitrate" || audio_codec_supports_vbr(&config.audio_codec));
@@ -236,6 +243,10 @@ fn settings_audio_bitrate_mode_grid(
                 window,
                 cx,
             )
+            .relative()
+            .when_some(badge, |button, badge| {
+                button.child(settings_audio_mode_badge_element(badge, enabled, palette))
+            })
             .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
                 cx.stop_propagation();
                 if !enabled {
@@ -251,6 +262,38 @@ fn settings_audio_bitrate_mode_grid(
     grid
 }
 
+/// 「可变码率」按钮上的 VBR 徽章：样式与视频页率控徽章一致——外层绝对定位挂右侧、
+/// 不参与按钮文字居中；内层胶囊 `surface_elevated` 底 + `border_subtle` 描边 +
+/// `text_muted` 10px。徽章常驻（不随选中态开关），报的是切过去将生效的率控模式。
+fn settings_audio_mode_badge_element(
+    label: &'static str,
+    enabled: bool,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_1()
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .px_1()
+                .py_0p5()
+                .rounded_full()
+                .border_1()
+                .border_color(color(palette.border_subtle))
+                .bg(color(palette.surface_elevated))
+                .text_color(color(palette.text_muted))
+                .text_size(theme::ui_rem(10.0))
+                .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+                .line_height(theme::ui_rem(12.0))
+                .when(enabled, gpui::Styled::cursor_pointer)
+                .child(theme::ui_text(label)),
+        )
+}
+
 fn settings_audio_bitrate_field(
     config: &ConversionConfig,
     disabled: bool,
@@ -262,10 +305,15 @@ fn settings_audio_bitrate_field(
 ) -> gpui::Div {
     div()
         .flex()
-        .flex_col()
-        .gap_2()
-        .child(settings_field_label("码率 (KB/s)", palette))
-        .child(frame_text_input(
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .flex_none()
+                .whitespace_nowrap()
+                .child(settings_field_label("码率 (kbps)", palette)),
+        )
+        .child(div().flex_1().min_w_0().child(frame_text_input(
             FrameTextInputSpec {
                 id: "settings-audio-bitrate-field",
                 value: if is_lossless {
@@ -285,7 +333,17 @@ fn settings_audio_bitrate_field(
             palette,
             window,
             cx,
-        ))
+        )))
+}
+
+/// 值控件（码率输入框 / 质量滑条）上方的淡分隔线：与节标题分隔线同款（1px canvas + 阴影），
+/// 把「码率 / 质量」这一行与上面的「目标码率 / 可变码率」切换在视觉上分开。
+fn settings_audio_field_divider(palette: &'static theme::ThemePalette) -> gpui::Div {
+    div()
+        .h(gpui::px(1.0))
+        .w_full()
+        .bg(color(palette.canvas))
+        .shadow(horizontal_separator_shadows(palette))
 }
 
 fn settings_audio_range_field(
