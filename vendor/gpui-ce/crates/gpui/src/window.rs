@@ -5541,6 +5541,21 @@ impl Window {
         }
     }
 
+    /// Register a callback that is invoked when a modal window drag session
+    /// starts (`true`) or ends (`false`). Raised on platforms with a modal
+    /// size/move loop (currently Windows only); never called elsewhere.
+    pub fn on_drag_session_changed(
+        &self,
+        cx: &App,
+        mut f: impl FnMut(&mut Window, &mut App, bool) + 'static,
+    ) {
+        let mut cx = self.to_async(cx);
+        self.platform_window
+            .on_drag_session_changed(Box::new(move |dragging| {
+                cx.update(|window, cx| f(window, cx, dragging)).ok();
+            }));
+    }
+
     /// Register a callback that can interrupt the closing of the current window based the returned boolean.
     /// If the callback returns false, the window won't be closed.
     pub fn on_window_should_close(

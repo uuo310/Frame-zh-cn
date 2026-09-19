@@ -304,6 +304,9 @@ pub struct FrameRoot {
     presets: Vec<PresetDefinition>,
     subtitle_ui: SubtitleUiState,
     preview_ui: PreviewUiState,
+    /// Set while a window drag paused an in-progress preview playback, so the
+    /// playback resumes exactly where it froze instead of jumping ahead.
+    window_drag_paused_playback: bool,
     next_file_sequence: u64,
     persistence: Option<AppPersistence>,
     auto_update_check: bool,

@@ -119,6 +119,7 @@ impl FrameRoot {
             presets,
             subtitle_ui: SubtitleUiState::default(),
             preview_ui: PreviewUiState::default(),
+            window_drag_paused_playback: false,
             next_file_sequence: 0,
             persistence,
             auto_update_check: persisted_settings.auto_update_check,

@@ -207,6 +207,7 @@ impl WindowsWindowInner {
         scale_factor: f32,
         should_resize_renderer: bool,
     ) {
+        self.state.sizemove_needs_repaint.set(true);
         let new_logical_size = device_size.to_pixels(scale_factor);
 
         self.state.logical_size.set(new_logical_size);
@@ -237,6 +238,12 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_move_loop(&self, handle: HWND) -> Option<isize> {
+        self.state.in_sizemove.set(true);
+        self.state.sizemove_needs_repaint.set(false);
+        if let Some(mut callback) = self.state.callbacks.drag_session.take() {
+            callback(true);
+            self.state.callbacks.drag_session.set(Some(callback));
+        }
         unsafe {
             let ret = SetTimer(
                 Some(handle),
@@ -255,6 +262,12 @@ impl WindowsWindowInner {
     }
 
     fn handle_size_move_loop_exit(&self, handle: HWND) -> Option<isize> {
+        if let Some(mut callback) = self.state.callbacks.drag_session.take() {
+            callback(false);
+            self.state.callbacks.drag_session.set(Some(callback));
+        }
+        self.state.in_sizemove.set(false);
+        self.state.sizemove_needs_repaint.set(false);
         unsafe {
             KillTimer(Some(handle), SIZE_MOVE_LOOP_TIMER_ID).log_err();
         }
@@ -1254,6 +1267,18 @@ impl WindowsWindowInner {
                 }
                 self.state.callbacks.input.set(Some(func));
             }
+        }
+        // While the modal size/move loop drags the window around without
+        // changing its size, the scene has nothing new to render. Repainting
+        // per paint message would re-render the whole window on the UI thread
+        // and starve mouse-move processing, visible as a low frame rate while
+        // dragging. DWM moves the presented surface on its own, so skip
+        // rendering until the size actually changed (`sizemove_needs_repaint`,
+        // set by `handle_size_change`) or the loop ends.
+        if self.state.in_sizemove.get() && !self.state.sizemove_needs_repaint.replace(false) {
+            self.state.callbacks.request_frame.set(Some(request_frame));
+            unsafe { ValidateRect(Some(handle), None).ok().log_err() };
+            return Some(0);
         }
         let force_render = force_render || self.state.force_render_after_recovery.take();
         #[cfg(not(feature = "wgpu"))]

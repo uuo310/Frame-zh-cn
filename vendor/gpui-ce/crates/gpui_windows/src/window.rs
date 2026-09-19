@@ -75,6 +75,16 @@ pub struct WindowsWindowState {
     /// cache, which would otherwise replay stale atlas tile references from
     /// the previous frame and panic in `DirectXAtlasState::texture`.
     pub force_render_after_recovery: Cell<bool>,
+    /// Set while the modal size/move loop is active whenever the window size
+    /// changed (resize drag or DPI change), so the loop's timer repaints only
+    /// when the scene actually needs re-laying out — not on pure window moves.
+    pub sizemove_needs_repaint: Cell<bool>,
+    /// True between `WM_ENTERSIZEMOVE` and `WM_EXITSIZEMOVE`. While it is set,
+    /// `draw_window` skips rendering unless `sizemove_needs_repaint` is set:
+    /// a pure window move doesn't change the scene, and repainting it per
+    /// paint message re-renders the whole window on the UI thread, starving
+    /// mouse-move processing (visible as a low frame rate while dragging).
+    pub in_sizemove: Cell<bool>,
 
     pub click_state: ClickState,
     pub current_cursor: Cell<Option<HCURSOR>>,
@@ -185,6 +195,8 @@ impl WindowsWindowState {
             hovered: Cell::new(hovered),
             renderer: RefCell::new(renderer),
             force_render_after_recovery: Cell::new(false),
+            sizemove_needs_repaint: Cell::new(false),
+            in_sizemove: Cell::new(false),
             click_state,
             current_cursor: Cell::new(current_cursor),
             cursor_visible,
@@ -394,6 +406,7 @@ pub(crate) struct Callbacks {
     pub(crate) hovered_status_change: Cell<Option<Box<dyn FnMut(bool)>>>,
     pub(crate) resize: Cell<Option<Box<dyn FnMut(Size<Pixels>, f32)>>>,
     pub(crate) moved: Cell<Option<Box<dyn FnMut()>>>,
+    pub(crate) drag_session: Cell<Option<Box<dyn FnMut(bool)>>>,
     pub(crate) should_close: Cell<Option<Box<dyn FnMut() -> bool>>>,
     pub(crate) close: Cell<Option<Box<dyn FnOnce()>>>,
     pub(crate) hit_test_window_control: Cell<Option<Box<dyn FnMut() -> Option<WindowControlArea>>>>,
@@ -986,6 +999,10 @@ impl PlatformWindow for WindowsWindow {
 
     fn on_moved(&self, callback: Box<dyn FnMut()>) {
         self.state.callbacks.moved.set(Some(callback));
+    }
+
+    fn on_drag_session_changed(&self, callback: Box<dyn FnMut(bool)>) {
+        self.state.callbacks.drag_session.set(Some(callback));
     }
 
     fn on_should_close(&self, callback: Box<dyn FnMut() -> bool>) {

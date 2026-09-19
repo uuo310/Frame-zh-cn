@@ -64,14 +64,30 @@ pub fn init_app(cx: &mut App, name: impl Into<SharedString>) {
 /// Panics when GPUI cannot create the main window.
 pub fn open_frame_window(cx: &mut App) {
     let bounds = Bounds::centered(None, size(px(WINDOW_MIN_WIDTH), px(WINDOW_MIN_HEIGHT)), cx);
-    cx.open_window(frame_window_options(bounds), |_, cx| {
-        cx.new(|cx| {
+    cx.open_window(frame_window_options(bounds), |window, cx| {
+        let root = cx.new(|cx| {
             let mut root = FrameRoot::new_with_platform_persistence();
             root.restore_pending_update_session(cx);
             root.load_runtime_capabilities(cx);
             root.startup_update_check(cx);
             root
-        })
+        });
+        // Freeze preview playback for the duration of a window drag: the
+        // Windows backend suppresses repaints while the drag is active, so the
+        // playback clock has to pause with it to avoid a jump on release.
+        let root_for_drag = root.downgrade();
+        window.on_drag_session_changed(cx, move |_, cx, dragging| {
+            if dragging {
+                root_for_drag
+                    .update(cx, |root, cx| root.pause_playback_for_window_drag(cx))
+                    .ok();
+            } else {
+                root_for_drag
+                    .update(cx, |root, cx| root.resume_playback_after_window_drag(cx))
+                    .ok();
+            }
+        });
+        root
     })
     .expect("failed to open Frame GPUI window");
 }

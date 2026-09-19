@@ -658,6 +658,10 @@ pub trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn on_hover_status_change(&self, callback: Box<dyn FnMut(bool)>);
     fn on_resize(&self, callback: Box<dyn FnMut(Size<Pixels>, f32)>);
     fn on_moved(&self, callback: Box<dyn FnMut()>);
+    /// Invoked when a modal size/move drag session starts (`true`) or ends
+    /// (`false`). Only platforms with a modal drag loop raise it; the default
+    /// is a no-op for platforms that never enter such a loop.
+    fn on_drag_session_changed(&self, _callback: Box<dyn FnMut(bool)>) {}
     fn on_should_close(&self, callback: Box<dyn FnMut() -> bool>);
     fn on_hit_test_window_control(&self, callback: Box<dyn FnMut() -> Option<WindowControlArea>>);
     fn on_close(&self, callback: Box<dyn FnOnce()>);
