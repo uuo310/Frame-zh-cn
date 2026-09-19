@@ -1,22 +1,24 @@
 use super::{
     model::{
         AUDIO_CHANNEL_DEFINITIONS, AUDIO_CODEC_DEFINITIONS, AudioQualityRange, ConversionConfig,
-        DEFAULT_AUDIO_BITRATE_MODE, DEFAULT_AUDIO_CHANNELS, DEFAULT_AUDIO_QUALITY,
-        DEFAULT_AUDIO_VOLUME, DEFAULT_FPS, DEFAULT_GIF_DITHER, DEFAULT_IMAGE_JPEG_HUFFMAN,
-        DEFAULT_IMAGE_PNG_PREDICTION, DEFAULT_IMAGE_TIFF_COMPRESSION, DEFAULT_IMAGE_WEBP_PRESET,
-        DEFAULT_PIXEL_FORMAT, DEFAULT_RESOLUTION, DEFAULT_VIDEO_BITRATE_MODE,
-        ExternalSubtitleTrack, FPS_OPTIONS, GIF_DITHER_OPTIONS, GIF_FPS_OPTIONS,
-        IMAGE_JPEG_HUFFMAN_OPTIONS, IMAGE_PNG_PREDICTION_OPTIONS, IMAGE_TIFF_COMPRESSION_OPTIONS,
-        IMAGE_WEBP_PRESET_OPTIONS, MAX_AUDIO_VOLUME, MAX_GIF_COLORS, MAX_GIF_LOOP,
-        MAX_IMAGE_JPEG_QUALITY, MAX_IMAGE_PNG_COMPRESSION, MAX_IMAGE_WEBP_COMPRESSION,
-        MAX_IMAGE_WEBP_QUALITY, MetadataField, MetadataMode, PresetDefinition, ProcessingMode,
-        RESOLUTION_OPTIONS, SCALING_ALGORITHM_OPTIONS, SUBTITLE_FONT_SIZES, SourceKind,
-        SourceMetadata, SubtitlePosition, VIDEO_CODEC_DEFINITIONS, VIDEO_PIXEL_FORMAT_DEFINITIONS,
+        DEFAULT_AUDIO_BITRATE, DEFAULT_AUDIO_BITRATE_MODE, DEFAULT_AUDIO_CHANNELS,
+        DEFAULT_AUDIO_QUALITY, DEFAULT_AUDIO_SAMPLE_RATE, DEFAULT_AUDIO_VOLUME, DEFAULT_FPS,
+        DEFAULT_GIF_DITHER, DEFAULT_IMAGE_JPEG_HUFFMAN, DEFAULT_IMAGE_PNG_PREDICTION,
+        DEFAULT_IMAGE_TIFF_COMPRESSION, DEFAULT_IMAGE_WEBP_PRESET, DEFAULT_PIXEL_FORMAT,
+        DEFAULT_RESOLUTION, DEFAULT_VIDEO_BITRATE_MODE, ExternalSubtitleTrack, FPS_OPTIONS,
+        GIF_DITHER_OPTIONS, GIF_FPS_OPTIONS, IMAGE_JPEG_HUFFMAN_OPTIONS,
+        IMAGE_PNG_PREDICTION_OPTIONS, IMAGE_TIFF_COMPRESSION_OPTIONS, IMAGE_WEBP_PRESET_OPTIONS,
+        MAX_AUDIO_VOLUME, MAX_GIF_COLORS, MAX_GIF_LOOP, MAX_IMAGE_JPEG_QUALITY,
+        MAX_IMAGE_PNG_COMPRESSION, MAX_IMAGE_WEBP_COMPRESSION, MAX_IMAGE_WEBP_QUALITY,
+        MetadataField, MetadataMode, PresetDefinition, ProcessingMode, RESOLUTION_OPTIONS,
+        SCALING_ALGORITHM_OPTIONS, SUBTITLE_FONT_SIZES, SourceKind, SourceMetadata,
+        SubtitlePosition, VIDEO_CODEC_DEFINITIONS, VIDEO_PIXEL_FORMAT_DEFINITIONS,
+        audio_bitrate_table, audio_bitrate_union_table, audio_sample_rate_table,
     },
     options::{
-        first_allowed_video_codec, first_allowed_video_pixel_format, first_allowed_video_preset,
-        is_nvenc_video_codec, is_video_preset_allowed,
-        is_videotoolbox_video_codec, mp2_original_channels_are_unsupported, normalized_hex_color,
+        audio_output_is_multichannel, first_allowed_video_codec, first_allowed_video_pixel_format,
+        first_allowed_video_preset, is_nvenc_video_codec, is_video_preset_allowed,
+        is_videotoolbox_video_codec, normalized_hex_color, original_channels_downmix_to_stereo,
     },
     rules::{
         container_supports_audio, container_supports_subtitles, default_audio_codec_for_container,
@@ -82,6 +84,19 @@ pub fn apply_audio_channels(config: &mut ConversionConfig, channels: &str) -> bo
     }
 
     config.audio_channels = channels;
+    true
+}
+
+pub fn apply_audio_sample_rate(config: &mut ConversionConfig, rate: &str) -> bool {
+    if config.processing_mode == ProcessingMode::Copy || !is_known_audio_sample_rate(rate) {
+        return false;
+    }
+
+    if config.audio_sample_rate == rate {
+        return false;
+    }
+
+    config.audio_sample_rate = rate.to_string();
     true
 }
 
@@ -1155,8 +1170,22 @@ pub fn normalize_output_config(
         config.audio_codec = default_audio_codec_for_container(&config.container).to_string();
     }
     normalize_audio_encoding_settings(config);
-    if mp2_original_channels_are_unsupported(config, metadata) {
+    if original_channels_downmix_to_stereo(config, metadata) {
         config.audio_channels = "stereo".to_string();
+    }
+    // 输出声道上下文到此已定（含上面的降混强制），码率吸附到当前 (编码×声道) 表最近档
+    // （如 AC3 遇 5.1 输出：192→384）。
+    if config.processing_mode != ProcessingMode::Copy
+        && let Some(table) = audio_bitrate_table(
+            &config.audio_codec,
+            audio_output_is_multichannel(config, metadata),
+        )
+        && !table.contains(&config.audio_bitrate.as_str())
+    {
+        config.audio_bitrate = match config.audio_bitrate.parse::<u32>() {
+            Ok(value) => snap_to_table_nearest(value, table).to_string(),
+            Err(_) => DEFAULT_AUDIO_BITRATE.to_string(),
+        };
     }
     normalize_video_config(config, metadata);
 
@@ -1300,17 +1329,58 @@ fn normalize_audio_encoding_settings(config: &mut ConversionConfig) {
     if !is_known_audio_channels(&config.audio_channels) {
         config.audio_channels = DEFAULT_AUDIO_CHANNELS.to_string();
     }
+    normalize_audio_sample_rate(config);
 
     config.audio_quality = normalized_audio_quality(&config.audio_codec, &config.audio_quality);
-    if config.audio_codec == "mp2"
-        && !matches!(
-            config.audio_bitrate.as_str(),
-            "64" | "96" | "112" | "128" | "160" | "192" | "224" | "256" | "320" | "384"
-        )
+    // 码率吸附用「并集」档（归一化时拿不到源元数据，定不了 AC3 的输出声道上下文）；
+    // 与当前输出声道不匹配的合法档位由选项层如实追加展示，不在此静默改写。
+    if let Some(table) = audio_bitrate_union_table(&config.audio_codec)
+        && !table.contains(&config.audio_bitrate.as_str())
     {
-        config.audio_bitrate = "192".to_string();
+        config.audio_bitrate = match config.audio_bitrate.parse::<u32>() {
+            Ok(value) => snap_to_table_nearest(value, table).to_string(),
+            Err(_) => DEFAULT_AUDIO_BITRATE.to_string(),
+        };
     }
     config.audio_volume = config.audio_volume.min(MAX_AUDIO_VOLUME);
+}
+
+/// 采样率归一化：「原始」与当前编码表内的档位原样保留；表外数值吸附最近档，
+/// 解析不出数值的回落「原始」。
+fn normalize_audio_sample_rate(config: &mut ConversionConfig) {
+    let rate = config.audio_sample_rate.as_str();
+    if rate == DEFAULT_AUDIO_SAMPLE_RATE {
+        return;
+    }
+    let table = audio_sample_rate_table(&config.audio_codec);
+    if table.contains(&rate) {
+        return;
+    }
+    config.audio_sample_rate = match rate.parse::<u32>() {
+        Ok(value) => snap_to_table_nearest(value, table).to_string(),
+        Err(_) => DEFAULT_AUDIO_SAMPLE_RATE.to_string(),
+    };
+}
+
+fn is_known_audio_sample_rate(rate: &str) -> bool {
+    matches!(rate, "original" | "44100" | "48000" | "96000")
+}
+
+/// 吸附到表内数值最近的一档（表非空；候选项均可解析为 u32）。
+fn snap_to_table_nearest<'a>(value: u32, table: &'a [&'a str]) -> &'a str {
+    let mut best = table[0];
+    let mut best_distance = value.abs_diff(best.parse::<u32>().unwrap_or(value));
+    for candidate in table {
+        let Ok(candidate_value) = candidate.parse::<u32>() else {
+            continue;
+        };
+        let distance = value.abs_diff(candidate_value);
+        if distance < best_distance {
+            best = candidate;
+            best_distance = distance;
+        }
+    }
+    best
 }
 
 fn normalize_image_encoding_settings(config: &mut ConversionConfig) {

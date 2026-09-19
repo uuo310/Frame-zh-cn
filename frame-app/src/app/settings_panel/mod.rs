@@ -36,6 +36,7 @@ use super::{
 
 mod audio;
 mod audio_filters;
+mod audio_selects;
 mod images;
 mod metadata;
 mod output;
@@ -49,6 +50,7 @@ mod video_selects;
 
 pub(super) use audio::*;
 pub(super) use audio_filters::*;
+pub(super) use audio_selects::*;
 pub(super) use images::*;
 pub(super) use metadata::*;
 pub(super) use output::*;

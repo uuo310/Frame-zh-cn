@@ -120,7 +120,7 @@ use crate::{
         PresetNotice, PresetNoticeTone, ProcessingMode, SettingsTab,
         SourceInfoSection, SourceKind, SourceMetadata, SourceTags, SubtitleFontOption,
         SubtitleFontSizeOption, add_external_subtitle_tracks, apply_audio_bitrate,
-        apply_audio_bitrate_mode, apply_audio_channels, apply_audio_codec, apply_audio_normalize,
+        apply_audio_bitrate_mode, apply_audio_normalize,
         apply_audio_quality, apply_audio_volume, apply_crf, apply_custom_height,
         apply_custom_width, apply_external_subtitle_default, apply_external_subtitle_forced,
         apply_external_subtitle_language, apply_external_subtitle_title,
@@ -146,11 +146,12 @@ use crate::{
         image_webp_preset_options, initialize_output_config, is_gif_container,
         is_hardware_video_codec, is_nvenc_video_codec, is_videotoolbox_video_codec,
         metadata_field_options, metadata_field_value, metadata_mode_description,
-        metadata_mode_options, mp2_original_channels_are_unsupported, normalize_output_config,
+        metadata_mode_options, normalize_output_config, original_channels_downmix_to_stereo,
         normalized_hex_color, output_container_options, output_processing_mode_options,
         remove_external_subtitle_track, resolution_options,
         resolve_active_settings_tab, sanitize_output_name, scaling_algorithm_options,
         source_info_sections, subtitle_burn_file_label, subtitle_color_value,
+        subtitles_tab_supported,
         subtitle_font_options, subtitle_font_size_options, subtitle_position_options,
         subtitle_track_options, toggle_audio_track_selection, toggle_subtitle_track_selection,
         video_codec_options, video_pixel_format_options, video_preset_options,
@@ -363,6 +364,20 @@ struct SettingsUiState {
     /// Popover placement anchor (window-space mouse y at last hover), one slot
     /// per video select row; frozen while that row's popover is not Hidden.
     video_select_anchor_y: [Option<f32>; 7],
+    audio_codec_select_popover: PopoverState,
+    audio_codec_select_scroll: ScrollHandle,
+    audio_bitrate_select_popover: PopoverState,
+    audio_bitrate_select_scroll: ScrollHandle,
+    audio_sample_rate_select_popover: PopoverState,
+    audio_sample_rate_select_scroll: ScrollHandle,
+    audio_channels_select_popover: PopoverState,
+    audio_channels_select_scroll: ScrollHandle,
+    /// 「源轨道」多选触发器的浮层状态（展开的勾选列表）。
+    audio_tracks_popover: PopoverState,
+    audio_tracks_select_scroll: ScrollHandle,
+    /// Popover placement anchor (window-space mouse y at last hover), one slot
+    /// per audio select row; frozen while that row's popover is not Hidden.
+    audio_select_anchor_y: [Option<f32>; 4],
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -488,6 +503,17 @@ impl Default for SettingsUiState {
             video_profile_select_popover: PopoverState::Hidden,
             video_profile_select_scroll: ScrollHandle::new(),
             video_select_anchor_y: [None; 7],
+            audio_codec_select_popover: PopoverState::Hidden,
+            audio_codec_select_scroll: ScrollHandle::new(),
+            audio_bitrate_select_popover: PopoverState::Hidden,
+            audio_bitrate_select_scroll: ScrollHandle::new(),
+            audio_sample_rate_select_popover: PopoverState::Hidden,
+            audio_sample_rate_select_scroll: ScrollHandle::new(),
+            audio_channels_select_popover: PopoverState::Hidden,
+            audio_channels_select_scroll: ScrollHandle::new(),
+            audio_tracks_popover: PopoverState::Hidden,
+            audio_tracks_select_scroll: ScrollHandle::new(),
+            audio_select_anchor_y: [None; 4],
         }
     }
 }
@@ -871,7 +897,6 @@ struct SettingsRenderState<'a> {
     settings_disabled: bool,
     output_name: &'a str,
     output_name_focus: Option<&'a FocusHandle>,
-    audio_bitrate_focus: Option<&'a FocusHandle>,
     video_width_focus: Option<&'a FocusHandle>,
     video_height_focus: Option<&'a FocusHandle>,
     video_bitrate_focus: Option<&'a FocusHandle>,
@@ -888,6 +913,12 @@ struct SettingsRenderState<'a> {
     video_scaling_select: SettingsVideoSelectUi<'a>,
     video_fps_select: SettingsVideoSelectUi<'a>,
     video_profile_select: SettingsVideoSelectUi<'a>,
+    audio_codec_select: SettingsVideoSelectUi<'a>,
+    audio_bitrate_select: SettingsVideoSelectUi<'a>,
+    audio_sample_rate_select: SettingsVideoSelectUi<'a>,
+    audio_channels_select: SettingsVideoSelectUi<'a>,
+    audio_tracks_popover: PopoverState,
+    audio_tracks_select_scroll: &'a ScrollHandle,
     metadata_focuses: SettingsMetadataInputFocuses<'a>,
     subtitle_focuses: SettingsSubtitleFocuses<'a>,
     external_subtitle_language_focus: Option<&'a FocusHandle>,

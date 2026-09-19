@@ -2,18 +2,18 @@ use frame_core::{capabilities::AvailableEncoders, media_rules};
 
 use super::{
     model::{
-        AUDIO_CHANNEL_DEFINITIONS, AUDIO_CODEC_DEFINITIONS, AudioChannelOption, AudioCodecOption,
-        AudioTrackOption, ConversionConfig, FPS_OPTIONS, GIF_COLOR_OPTIONS, GIF_DITHER_OPTIONS,
-        GIF_FPS_OPTIONS, IMAGE_JPEG_HUFFMAN_OPTIONS, IMAGE_PNG_PREDICTION_OPTIONS,
-        IMAGE_TIFF_COMPRESSION_OPTIONS, IMAGE_WEBP_PRESET_OPTIONS, ImageEncodingOption,
-        METADATA_FIELDS, METADATA_MODES, MetadataConfig, MetadataField, MetadataFieldOption,
-        MetadataMode, MetadataModeOption, OPTIONAL_AUDIO_CODEC_DEFINITIONS, OutputContainerOption,
-        OutputModeOption, PresetDefinition, PresetOption, ProcessingMode, RESOLUTION_OPTIONS,
-        SCALING_ALGORITHM_OPTIONS, SUBTITLE_FONT_SIZES, SUBTITLE_POSITIONS, SourceKind,
-        SourceMetadata, SubtitleFontOption, SubtitleFontSizeOption, SubtitlePosition,
+        AUDIO_CHANNEL_DEFINITIONS, AUDIO_CODEC_DEFINITIONS, AudioBitrateOption, AudioChannelOption,
+        AudioCodecOption, AudioSampleRateOption, AudioTrackOption, ConversionConfig, FPS_OPTIONS,
+        GIF_COLOR_OPTIONS, GIF_DITHER_OPTIONS, GIF_FPS_OPTIONS, IMAGE_JPEG_HUFFMAN_OPTIONS,
+        IMAGE_PNG_PREDICTION_OPTIONS, IMAGE_TIFF_COMPRESSION_OPTIONS, IMAGE_WEBP_PRESET_OPTIONS,
+        ImageEncodingOption, METADATA_FIELDS, METADATA_MODES, MetadataConfig, MetadataField,
+        MetadataFieldOption, MetadataMode, MetadataModeOption, OPTIONAL_AUDIO_CODEC_DEFINITIONS,
+        OutputContainerOption, OutputModeOption, PresetDefinition, PresetOption, ProcessingMode,
+        RESOLUTION_OPTIONS, SCALING_ALGORITHM_OPTIONS, SUBTITLE_FONT_SIZES, SUBTITLE_POSITIONS,
+        SourceKind, SourceMetadata, SubtitleFontOption, SubtitleFontSizeOption, SubtitlePosition,
         SubtitlePositionOption, SubtitleTrackOption, VIDEO_CODEC_DEFINITIONS,
         VIDEO_PIXEL_FORMAT_DEFINITIONS, VIDEO_PRESETS, VideoCodecCapability, VideoCodecOption,
-        VideoPixelFormatOption, VideoPresetOption,
+        VideoPixelFormatOption, VideoPresetOption, audio_bitrate_table, audio_sample_rate_table,
     },
     rules::{
         is_audio_codec_allowed_for_container, is_audio_only_container,
@@ -97,16 +97,17 @@ pub fn audio_codec_options(
                 })
                 .map(|definition| (definition.codec, definition.label)),
         )
-        .map(|definition| {
+        .filter_map(|definition| {
+            // 下拉形态：容器不兼容的编码直接不列（有意区别于视频页的灰显带原因）。
             let is_compatible =
                 is_audio_codec_allowed_for_container(&config.container, definition.0);
-            AudioCodecOption {
+            is_compatible.then(|| AudioCodecOption {
                 codec: definition.0,
                 label: definition.1,
                 is_selected: config.audio_codec.eq_ignore_ascii_case(definition.0),
-                is_disabled: encode_controls_disabled || !is_compatible,
-                disabled_reason: (!is_compatible).then_some("不兼容的封装格式"),
-            }
+                is_disabled: encode_controls_disabled,
+                disabled_reason: None,
+            })
         })
         .collect()
 }
@@ -116,34 +117,249 @@ pub fn audio_channel_options(
     config: &ConversionConfig,
     metadata: Option<&SourceMetadata>,
     disabled: bool,
-) -> [AudioChannelOption; 3] {
+) -> Vec<AudioChannelOption> {
     let disabled = disabled || config.processing_mode == ProcessingMode::Copy;
-    let original_is_unsupported = mp2_original_channels_are_unsupported(config, metadata);
+    let downmix_forced = original_channels_downmix_to_stereo(config, metadata);
+    let original_fallback = audio_original_channel_fallback(config, metadata);
 
-    AUDIO_CHANNEL_DEFINITIONS.map(|definition| AudioChannelOption {
-        id: definition.id,
-        label: definition.label,
-        is_selected: config.audio_channels.eq_ignore_ascii_case(definition.id),
-        is_disabled: disabled || (definition.id == "original" && original_is_unsupported),
-    })
+    AUDIO_CHANNEL_DEFINITIONS
+        .iter()
+        .map(|definition| {
+            // 「原始」的落点（如 立体声/5.1）放副行小字展示；纯展示层，不动 id。
+            let is_original = definition.id == "original";
+            AudioChannelOption {
+                id: definition.id,
+                label: definition.label.to_string(),
+                caption: match (is_original, &original_fallback) {
+                    (true, Some(fallback)) => fallback.clone(),
+                    _ => String::new(),
+                },
+                is_selected: config.audio_channels.eq_ignore_ascii_case(definition.id),
+                is_disabled: disabled || (is_original && downmix_forced),
+            }
+        })
+        .collect()
 }
 
-#[must_use]
-pub fn mp2_original_channels_are_unsupported(
+/// 编码器声道上限（源声道更多时 ffmpeg 会静默降混到该上限，实测核实）；
+/// `None`＝无固定白名单（aac/flac/alac/pcm_s16le/libopus 等）。
+fn audio_encoder_max_channels(codec: &str) -> Option<u16> {
+    match codec {
+        "mp3" | "mp2" => Some(2),
+        "ac3" => Some(6),
+        "pcm_bluray" => Some(8),
+        _ => None,
+    }
+}
+
+fn selected_audio_tracks_channel_counts(
     config: &ConversionConfig,
     metadata: Option<&SourceMetadata>,
-) -> bool {
-    config.audio_codec == "mp2"
-        && metadata.is_some_and(|metadata| {
-            metadata.audio_tracks.iter().any(|track| {
-                config.selected_audio_tracks.contains(&track.index)
-                    && track
+) -> Vec<u16> {
+    metadata
+        .map(|metadata| {
+            metadata
+                .audio_tracks
+                .iter()
+                .filter(|track| config.selected_audio_tracks.contains(&track.index))
+                .filter_map(|track| {
+                    track
                         .channels
                         .as_deref()
                         .and_then(|channels| channels.parse::<u16>().ok())
-                        .is_some_and(|channels| channels > 2)
-            })
+                })
+                .collect()
         })
+        .unwrap_or_default()
+}
+
+fn selected_audio_tracks_max_channels(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> Option<u16> {
+    selected_audio_tracks_channel_counts(config, metadata)
+        .into_iter()
+        .max()
+}
+
+/// 「原始」声道 + 选中轨含多声道 + 编码器只吃得到立体声（mp3/mp2）→ 原始会静默降混，
+/// 该档位灰显（原 mp2 专项守卫的泛化，mp3 一并补齐）。
+#[must_use]
+pub fn original_channels_downmix_to_stereo(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> bool {
+    config.audio_channels == "original"
+        && audio_encoder_max_channels(&config.audio_codec).is_some_and(|max| max <= 2)
+        && selected_audio_tracks_max_channels(config, metadata).is_some_and(|channels| channels > 2)
+}
+
+/// 当前音频输出是否多声道（>2）：「原始」+ 编码器吃得下 + 选中轨含 >2 声道。
+/// 决定 AC3 码率下拉走立体声组还是 5.1 组（动态单组判定源）。
+#[must_use]
+pub fn audio_output_is_multichannel(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> bool {
+    config.audio_channels == "original"
+        && audio_encoder_max_channels(&config.audio_codec).is_none_or(|max| max > 2)
+        && selected_audio_tracks_max_channels(config, metadata).is_some_and(|channels| channels > 2)
+}
+
+/// 「原始」的实际落点显示（编码器钳制后）：选中轨声道逐值列举
+/// （6→5.1、8→7.1、2→立体声、1→单声道、其余「N 声道」），如 立体声/5.1；
+/// 钳到同名自然去重，拿不到数据不给——宁缺勿谎。
+#[must_use]
+pub fn audio_original_channel_fallback(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> Option<String> {
+    if config.audio_channels != "original" {
+        return None;
+    }
+    let mut counts = selected_audio_tracks_channel_counts(config, metadata);
+    counts.sort_unstable();
+    counts.dedup();
+    if counts.is_empty() {
+        return None;
+    }
+    // 逐值列举（如 立体声/5.1）；同名经编码器钳制后自然去重（mp3 下 2/6 声道都落立体声）。
+    let mut names: Vec<String> = counts
+        .iter()
+        .map(|count| {
+            let effective = audio_encoder_max_channels(&config.audio_codec)
+                .map_or(*count, |max| max.min(*count));
+            match effective {
+                1 => "单声道".to_string(),
+                2 => "立体声".to_string(),
+                6 => "5.1".to_string(),
+                8 => "7.1".to_string(),
+                other => format!("{other} 声道"),
+            }
+        })
+        .collect();
+    names.dedup();
+    Some(names.join("/"))
+}
+
+/// 「原始」采样率的落点显示数据：选中轨采样率全一致 → "48"；不一致 → "44.1/48" 逐值列举；
+/// 拿不到数据 → None。源率如实显示，不做编码器钳制（界面描述源事实，不代转码器发言）。
+#[must_use]
+pub fn audio_sample_rate_original_fallback(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> Option<String> {
+    let mut rates: Vec<u32> = metadata
+        .map(|metadata| {
+            metadata
+                .audio_tracks
+                .iter()
+                .filter(|track| config.selected_audio_tracks.contains(&track.index))
+                .filter_map(|track| {
+                    track
+                        .sample_rate
+                        .as_deref()
+                        .and_then(|rate| rate.parse::<u32>().ok())
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    rates.sort_unstable();
+    rates.dedup();
+    if rates.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = rates.iter().map(|rate| format_khz_label(*rate)).collect();
+    Some(parts.join("/"))
+}
+
+/// Hz → kHz 显示值，去尾零（48000→"48"、44100→"44.1"、22050→"22.05"）。
+fn format_khz_label(hz: u32) -> String {
+    let text = format!("{:.3}", f64::from(hz) / 1000.0);
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    text.to_string()
+}
+
+/// 码率下拉选项：按 (编码 × 输出声道) 取档位短表；无损编码返回空（整行隐藏）。
+/// 与当前输出声道不匹配的存量档位如实追加并标注「当前值」，不静默改写。
+#[must_use]
+pub fn audio_bitrate_options(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+    disabled: bool,
+) -> Vec<AudioBitrateOption> {
+    let Some(table) = audio_bitrate_table(
+        &config.audio_codec,
+        audio_output_is_multichannel(config, metadata),
+    ) else {
+        return Vec::new();
+    };
+    let disabled = disabled || config.processing_mode == ProcessingMode::Copy;
+    let mut values: Vec<String> = table.iter().map(|value| (*value).to_string()).collect();
+    if !values.iter().any(|value| value == &config.audio_bitrate)
+        && config.audio_bitrate.parse::<u32>().is_ok()
+    {
+        values.push(config.audio_bitrate.clone());
+    }
+
+    values
+        .into_iter()
+        .map(|value| {
+            let in_table = table.contains(&value.as_str());
+            AudioBitrateOption {
+                caption: if in_table {
+                    String::new()
+                } else {
+                    "当前值".to_string()
+                },
+                is_selected: config.audio_bitrate == value,
+                is_disabled: disabled,
+                label: format!("{value} kbps"),
+                value,
+            }
+        })
+        .collect()
+}
+
+/// 采样率下拉选项：「原始」恒在首位（不发 `-ar` 跟随源，带源率后缀），其后为当前编码的档位表。
+#[must_use]
+pub fn audio_sample_rate_options(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+    disabled: bool,
+) -> Vec<AudioSampleRateOption> {
+    let disabled = disabled || config.processing_mode == ProcessingMode::Copy;
+    let original_caption = match audio_sample_rate_original_fallback(config, metadata) {
+        Some(fallback) => format!("{fallback} kHz"),
+        None => String::new(),
+    };
+    let mut values = vec![("original", "原始".to_string(), original_caption)];
+    values.extend(
+        audio_sample_rate_table(&config.audio_codec)
+            .iter()
+            .map(|rate| (*rate, format_sample_rate_label(rate), String::new())),
+    );
+
+    values
+        .into_iter()
+        .map(|(value, label, caption)| AudioSampleRateOption {
+            is_selected: config.audio_sample_rate == value,
+            is_disabled: disabled,
+            value: value.to_string(),
+            label,
+            caption,
+        })
+        .collect()
+}
+
+/// 采样率单位写法沿用术语表：kHz。
+fn format_sample_rate_label(rate: &str) -> String {
+    match rate {
+        "44100" => "44.1 kHz".to_string(),
+        "48000" => "48 kHz".to_string(),
+        "96000" => "96 kHz".to_string(),
+        other => format!("{other} Hz"),
+    }
 }
 
 #[must_use]

@@ -119,11 +119,26 @@ pub(in crate::app) fn settings_video_tab(
         .iter()
         .find(|option| option.selected)
         .map_or_else(|| "跟随默认".to_string(), |option| option.label.clone());
+    // 状态后缀只属于分辨率/帧率行（选中项 caption 即落点，如 3840×2160 / 30 fps）；
+    // 编码、像素格式、预设等行的 caption 语义不同，永不进触发器。
+    let selected_caption = |options: &Vec<VideoSelectOption>| -> Option<String> {
+        options
+            .iter()
+            .find(|option| option.selected)
+            .and_then(|option| (!option.caption.is_empty()).then(|| option.caption.clone()))
+    };
+    let resolution_value_suffix = (config.resolution == "original")
+        .then(|| selected_caption(&resolution_options_list))
+        .flatten();
+    let fps_value_suffix = (config.fps == "original")
+        .then(|| selected_caption(&fps_options_list))
+        .flatten();
     let mut content = div().flex().flex_col().gap_4().child(video_select_row(
         VideoSelectRowState {
             id: VideoSelectId::Resolution,
             options: resolution_options_list,
             selected_label: resolution_selected_label,
+            value_suffix: resolution_value_suffix,
             enabled: !settings_disabled,
             tooltip_visible_id,
             palette,
@@ -167,6 +182,7 @@ pub(in crate::app) fn settings_video_tab(
                 id: VideoSelectId::Scaling,
                 options: scaling_options_list,
                 selected_label: scaling_selected_label,
+                value_suffix: None,
                 enabled: !settings_disabled && config.resolution != "original",
                 tooltip_visible_id,
                 palette,
@@ -180,6 +196,7 @@ pub(in crate::app) fn settings_video_tab(
                 id: VideoSelectId::Fps,
                 options: fps_options_list,
                 selected_label: fps_selected_label,
+                value_suffix: fps_value_suffix,
                 enabled: !settings_disabled,
                 tooltip_visible_id,
                 palette,
@@ -221,6 +238,7 @@ pub(in crate::app) fn settings_video_tab(
                 id: VideoSelectId::Codec,
                 options: codec_options,
                 selected_label: codec_selected_label,
+                value_suffix: None,
                 enabled: !settings_disabled,
                 tooltip_visible_id,
                 palette,
@@ -234,6 +252,7 @@ pub(in crate::app) fn settings_video_tab(
                 id: VideoSelectId::PixelFormat,
                 options: pixel_format_options,
                 selected_label: pixel_format_selected_label,
+                value_suffix: None,
                 enabled: !settings_disabled,
                 tooltip_visible_id,
                 palette,
@@ -252,6 +271,7 @@ pub(in crate::app) fn settings_video_tab(
                         id: VideoSelectId::Preset,
                         options: preset_options,
                         selected_label: preset_selected_label,
+                        value_suffix: None,
                         enabled: !settings_disabled,
                         tooltip_visible_id,
                         palette,
@@ -272,6 +292,7 @@ pub(in crate::app) fn settings_video_tab(
                         id: VideoSelectId::Profile,
                         options: profile_options,
                         selected_label: profile_selected_label,
+                        value_suffix: None,
                         enabled: !settings_disabled,
                         tooltip_visible_id,
                         palette,
@@ -1797,7 +1818,7 @@ pub(in crate::app) fn scaling_algorithm_label(algorithm: &str) -> &'static str {
 
 fn fps_label(fps: &str) -> String {
     if fps == "original" {
-        "与源相同".to_string()
+        "原始".to_string()
     } else {
         format!("{fps} fps")
     }

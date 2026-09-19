@@ -54,11 +54,21 @@ pub(in crate::app) fn settings_images_tab(
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
+    let resolution_options = video_resolution_select_options(config, settings_disabled, metadata);
+    let resolution_value_suffix = (config.resolution == "original")
+        .then(|| {
+            resolution_options
+                .iter()
+                .find(|option| option.selected)
+                .and_then(|option| (!option.caption.is_empty()).then(|| option.caption.clone()))
+        })
+        .flatten();
     let mut content = div().flex().flex_col().gap_4().child(video_select_row(
         VideoSelectRowState {
             id: VideoSelectId::Resolution,
-            options: video_resolution_select_options(config, settings_disabled, metadata),
+            options: resolution_options,
             selected_label: resolution_label(&config.resolution).to_string(),
+            value_suffix: resolution_value_suffix,
             enabled: !settings_disabled,
             tooltip_visible_id: None,
             palette,
@@ -101,6 +111,7 @@ pub(in crate::app) fn settings_images_tab(
             id: VideoSelectId::Scaling,
             options: video_scaling_select_options(config, settings_disabled),
             selected_label: scaling_algorithm_label(&config.scaling_algorithm).to_string(),
+            value_suffix: None,
             enabled: !settings_disabled && config.resolution != "original",
             tooltip_visible_id: None,
             palette,

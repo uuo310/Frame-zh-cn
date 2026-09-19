@@ -31,6 +31,7 @@ fn core_config_from_gpui_preserves_active_conversion_fields() {
         audio_bitrate_mode: "bitrate".to_string(),
         audio_quality: "4".to_string(),
         audio_channels: "stereo".to_string(),
+    audio_sample_rate: "original".to_string(),
         audio_volume: 125,
         audio_normalize: true,
         external_subtitle_tracks: vec![ExternalSubtitleTrack {

@@ -8,8 +8,8 @@ use super::{
     button_highlight_shadows, button_motion, color, div, frame_tooltip, icon_svg, mix_color,
     panel_bottom_separator, resolve_active_settings_tab, settings_audio_filters_tab,
     settings_audio_tab, settings_images_tab, settings_metadata_tab, settings_output_tab,
-    settings_section_label, settings_source_tab, settings_subtitles_tab,
-    settings_tab_icon, settings_video_filters_tab, settings_video_tab, theme,
+    settings_section_label, settings_source_tab, settings_subtitles_tab, settings_tab_icon,
+    settings_video_filters_tab, settings_video_tab, subtitles_tab_supported, theme,
     visible_settings_tabs,
 };
 use crate::settings::source_kind_for;
@@ -345,16 +345,11 @@ pub(in crate::app) fn settings_tab_content(
             window,
             cx,
         )),
-        SettingsTab::Audio => content.child(settings_audio_tab(
-            settings.config,
-            settings.metadata,
-            settings.settings_disabled,
-            settings.available_encoders,
-            settings.audio_bitrate_focus,
-            palette,
-            window,
-            cx,
-        )),
+        SettingsTab::Audio | SettingsTab::Subtitles => content.child(
+            // 软合并：音频区（上）+ 字幕区（下）同页滚动；Subtitles 变体保留但 rail 不再单列，
+            // 持久化的 Subtitles 活动页由 resolve_active_settings_tab 映射到 Audio。
+            settings_audio_subtitles_content(settings, window, cx),
+        ),
         SettingsTab::AudioFilters => content.child(settings_audio_filters_tab(
             settings.config,
             settings.settings_disabled,
@@ -363,7 +358,43 @@ pub(in crate::app) fn settings_tab_content(
             window,
             cx,
         )),
-        SettingsTab::Subtitles => content.child(settings_subtitles_tab(
+        SettingsTab::Metadata => content.child(settings_metadata_tab(
+            settings.config,
+            settings.metadata,
+            settings.settings_disabled,
+            settings.metadata_focuses,
+            palette,
+            window,
+            cx,
+        )),
+    }
+}
+
+/// 合并页内容：音频区（四行下拉 + 条件行 + 源轨道触发器）在上，
+/// 字幕区（模式分支 + 风格浮层）在源/容器支持时追加在下，同页滚动。
+fn settings_audio_subtitles_content(
+    settings: &SettingsRenderState<'_>,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let palette = settings.palette;
+    let content = div().child(settings_audio_tab(
+        settings.config,
+        settings.metadata,
+        settings.settings_disabled,
+        settings.available_encoders,
+        settings.audio_codec_select,
+        settings.audio_bitrate_select,
+        settings.audio_sample_rate_select,
+        settings.audio_channels_select,
+        settings.audio_tracks_popover,
+        settings.audio_tracks_select_scroll,
+        palette,
+        window,
+        cx,
+    ));
+    if subtitles_tab_supported(settings.config, settings.metadata) {
+        content.child(settings_subtitles_tab(
             SettingsSubtitlesTabState {
                 config: settings.config,
                 metadata: settings.metadata,
@@ -388,16 +419,9 @@ pub(in crate::app) fn settings_tab_content(
             },
             window,
             cx,
-        )),
-        SettingsTab::Metadata => content.child(settings_metadata_tab(
-            settings.config,
-            settings.metadata,
-            settings.settings_disabled,
-            settings.metadata_focuses,
-            palette,
-            window,
-            cx,
-        )),
+        ))
+    } else {
+        content
     }
 }
 

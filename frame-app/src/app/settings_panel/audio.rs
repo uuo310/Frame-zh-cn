@@ -1,115 +1,440 @@
+use super::super::motion::{
+    INTERACTION_MOTION_DURATION, motion_is_hidden, motion_target, set_motion_target,
+    subtitle_popover_slide_offset,
+};
 use super::*;
+use crate::settings::{audio_bitrate_options, audio_sample_rate_options};
 
 #[expect(
     clippy::too_many_arguments,
-    reason = "The audio tab explicitly receives conversion state, capabilities, focus, palette, and render context."
+    reason = "The audio tab explicitly receives conversion state, capabilities, select UIs, and render context."
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "The tab assembles the four select rows, conditional rows, hints, and the tracks trigger in one place."
 )]
 pub(in crate::app) fn settings_audio_tab(
     config: &ConversionConfig,
     metadata: Option<&SourceMetadata>,
     settings_disabled: bool,
     available_encoders: &AvailableEncoders,
-    audio_bitrate_focus: Option<&FocusHandle>,
+    codec_select: SettingsVideoSelectUi<'_>,
+    bitrate_select: SettingsVideoSelectUi<'_>,
+    sample_rate_select: SettingsVideoSelectUi<'_>,
+    channels_select: SettingsVideoSelectUi<'_>,
+    tracks_popover: PopoverState,
+    tracks_scroll: &ScrollHandle,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    let mut channels_section = settings_section("声道 / 码率", palette)
-        .child(settings_audio_channels_grid(
-            config,
-            metadata,
-            settings_disabled,
+    let encode_disabled = settings_disabled || config.processing_mode == ProcessingMode::Copy;
+    let is_lossless = is_lossless_audio_codec(&config.audio_codec);
+    let show_mode_toggle = !is_lossless && audio_codec_supports_vbr(&config.audio_codec);
+    let is_vbr = show_mode_toggle && config.audio_bitrate_mode == "vbr";
+
+    let codec_options_list = audio_codec_options(config, available_encoders, settings_disabled)
+        .into_iter()
+        // 与旧编码列表同向：ffmpeg id 作主行、友好名作副行。
+        .map(|option| AudioSelectOption {
+            id: option.codec.to_string(),
+            label: option.codec.to_string(),
+            caption: option.label.to_string(),
+            selected: option.is_selected,
+            enabled: !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let codec_selected_label = codec_options_list
+        .iter()
+        .find(|option| option.selected)
+        .map_or_else(|| config.audio_codec.clone(), |option| option.label.clone());
+
+    let bitrate_options_list = audio_bitrate_options(config, metadata, settings_disabled)
+        .into_iter()
+        .map(|option| AudioSelectOption {
+            id: option.value,
+            label: option.label,
+            caption: option.caption,
+            selected: option.is_selected,
+            enabled: !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let bitrate_selected_label = bitrate_label(&config.audio_bitrate, &bitrate_options_list);
+
+    let sample_rate_options_list = audio_sample_rate_options(config, metadata, settings_disabled)
+        .into_iter()
+        .map(|option| AudioSelectOption {
+            id: option.value,
+            label: option.label,
+            caption: option.caption,
+            selected: option.is_selected,
+            enabled: !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let sample_rate_selected_label = sample_rate_options_list
+        .iter()
+        .find(|option| option.selected)
+        .map_or_else(
+            || config.audio_sample_rate.clone(),
+            |option| option.label.clone(),
+        );
+
+    let channels_options_list = audio_channel_options(config, metadata, settings_disabled)
+        .into_iter()
+        .map(|option| AudioSelectOption {
+            id: option.id.to_string(),
+            label: option.label,
+            caption: option.caption,
+            selected: option.is_selected,
+            enabled: !option.is_disabled,
+        })
+        .collect::<Vec<_>>();
+    let channels_selected_label = channels_options_list
+        .iter()
+        .find(|option| option.selected)
+        .map_or_else(
+            || config.audio_channels.clone(),
+            |option| option.label.clone(),
+        );
+
+    // 四行下拉（编码 / 码率 / 采样率 / 声道），间隔与视频页上半区同款：gap_4 裸堆叠、行间无线。
+    let mut content = div().flex().flex_col().gap_4().child(audio_select_row(
+        AudioSelectRowState {
+            id: AudioSelectId::Codec,
+            options: codec_options_list,
+            selected_label: codec_selected_label,
+            enabled: !encode_disabled,
             palette,
+            ui: codec_select,
+        },
+        window,
+        cx,
+    ));
+
+    if show_mode_toggle {
+        content = content.child(audio_labeled_row(
+            "码率模式",
+            settings_audio_bitrate_mode_grid(config, encode_disabled, palette, window, cx),
+            palette,
+        ));
+    }
+
+    if is_vbr {
+        if let Some(range) = audio_quality_range(&config.audio_codec) {
+            let value = parse_audio_value(&config.audio_quality, range.default_value)
+                .clamp(range.min, range.max);
+            let lower_label = if range.lower_is_better {
+                "最佳"
+            } else {
+                "最小"
+            };
+            let upper_label = if range.lower_is_better {
+                "最小"
+            } else {
+                "最佳"
+            };
+            content = content.child(audio_labeled_row(
+                "质量等级",
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_2()
+                    .child(
+                        div()
+                            .flex()
+                            .justify_end()
+                            .child(settings_value_badge(format!("Q {value}"), palette)),
+                    )
+                    .child(settings_audio_range_slider(
+                        value,
+                        range.min,
+                        range.max,
+                        encode_disabled,
+                        SettingsAudioRangeTarget::Quality,
+                        palette,
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .justify_between()
+                            .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+                            .text_color(color(palette.text_muted))
+                            .child(theme::ui_text(lower_label))
+                            .child(theme::ui_text(upper_label)),
+                    ),
+                palette,
+            ));
+        }
+    } else if !bitrate_options_list.is_empty() {
+        // 无损编码没有码率概念：整行不渲染（档位表返回空）。
+        content = content.child(audio_select_row(
+            AudioSelectRowState {
+                id: AudioSelectId::Bitrate,
+                options: bitrate_options_list,
+                selected_label: bitrate_selected_label,
+                enabled: !encode_disabled,
+                palette,
+                ui: bitrate_select,
+            },
+            window,
+            cx,
+        ));
+    }
+
+    content = content
+        .child(audio_select_row(
+            AudioSelectRowState {
+                id: AudioSelectId::SampleRate,
+                options: sample_rate_options_list,
+                selected_label: sample_rate_selected_label,
+                enabled: !encode_disabled,
+                palette,
+                ui: sample_rate_select,
+            },
             window,
             cx,
         ))
-        .child(settings_audio_encoding_controls(
-            config,
-            settings_disabled,
-            audio_bitrate_focus,
-            palette,
+        .child(audio_select_row(
+            AudioSelectRowState {
+                id: AudioSelectId::Channels,
+                options: channels_options_list,
+                selected_label: channels_selected_label,
+                enabled: !encode_disabled,
+                palette,
+                ui: channels_select,
+            },
             window,
             cx,
         ));
+
     if config.processing_mode == ProcessingMode::Copy {
-        channels_section = channels_section.child(settings_hint_text(
-            "流复制模式保留源音频设置。",
-            palette,
-        ));
-    } else if mp2_original_channels_are_unsupported(config, metadata) {
-        channels_section = channels_section.child(settings_hint_text(
-            "MP2 最多支持两个声道；多声道源轨道将导出为立体声。",
+        content = content.child(settings_hint_text("流复制模式保留源音频设置。", palette));
+    } else if original_channels_downmix_to_stereo(config, metadata) {
+        content = content.child(settings_hint_text(
+            "MP3/MP2 最多支持两个声道；多声道源轨道将导出为立体声。",
             palette,
         ));
     }
 
-    let content = div()
-        .flex()
-        .flex_col()
-        .gap_4()
-        .child(channels_section)
-        .child(
-            settings_section("编码", palette).child(settings_audio_codec_list(
-                config,
-                available_encoders,
-                settings_disabled,
-                palette,
-                window,
-                cx,
-            )),
-        );
-
-    let track_options = audio_track_options(config, metadata, settings_disabled);
-    if track_options.is_empty() {
-        return content.child(
-            settings_section("源轨道", palette)
-                .child(settings_hint_text("无音频轨道。", palette)),
-        );
-    }
-
-    let mut list = div().flex().flex_col().gap_2();
-    for option in track_options {
-        list = list.child(settings_audio_track_button(option, palette, window, cx));
-    }
-
-    content.child(settings_section("源轨道", palette).child(list))
+    content.child(settings_audio_tracks_row(
+        config,
+        metadata,
+        settings_disabled,
+        tracks_popover,
+        tracks_scroll,
+        palette,
+        window,
+        cx,
+    ))
 }
 
-pub(in crate::app) fn settings_audio_channels_grid(
+/// 与下拉行同构的标签行（label 左 + 控件右），供模式切换、质量滑条等非下拉行对齐版式。
+fn audio_labeled_row(
+    label: &'static str,
+    control: impl IntoElement,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .flex_none()
+                .w(theme::ui_rem(64.0))
+                .min_w_0()
+                .truncate()
+                .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+                .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+                .text_color(color(palette.text_primary))
+                .child(theme::ui_text(label)),
+        )
+        .child(
+            div()
+                .relative()
+                .flex_none()
+                .w(relative(0.75))
+                .child(control),
+        )
+}
+
+fn bitrate_label(current: &str, options: &[AudioSelectOption]) -> String {
+    options.iter().find(|option| option.selected).map_or_else(
+        || {
+            if current.is_empty() {
+                current.to_string()
+            } else {
+                format!("{current} kbps")
+            }
+        },
+        |option| option.label.clone(),
+    )
+}
+
+/// 「源轨道」多选触发器：收起一行显示「已选 N/M」，展开为现有勾选轨道列表的浮层。
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The tracks row mirrors the select rows' explicit render context."
+)]
+#[expect(
+    clippy::too_many_lines,
+    reason = "The tracks row keeps trigger, placement, motion, and the checkbox list together for one GPUI control."
+)]
+fn settings_audio_tracks_row(
     config: &ConversionConfig,
     metadata: Option<&SourceMetadata>,
     settings_disabled: bool,
+    tracks_popover: PopoverState,
+    tracks_scroll: &ScrollHandle,
     palette: &'static theme::ThemePalette,
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
-    let mut grid = div().grid().grid_cols(3).gap_2();
-    for option in audio_channel_options(config, metadata, settings_disabled) {
-        let channels = option.id;
-        let is_enabled = !option.is_disabled;
-        grid = grid.child(
-            frame_choice_button(
-                format!("audio-channels-{channels}"),
-                option.label,
-                option.is_selected,
-                is_enabled,
-                palette,
-                window,
-                cx,
-            )
-            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-                cx.stop_propagation();
-                if !is_enabled {
-                    return;
-                }
-                if root.update_selected_config(|config| apply_audio_channels(config, channels)) {
+    let track_options = audio_track_options(config, metadata, settings_disabled);
+    let track_count = track_options.len();
+    let selected_count = track_options
+        .iter()
+        .filter(|option| option.is_selected)
+        .count();
+    let enabled = !settings_disabled && track_count > 0;
+    let expanded = tracks_popover == PopoverState::Open;
+    let value = if track_count == 0 {
+        "无音频轨道".to_string()
+    } else {
+        format!("已选 {selected_count}/{track_count}")
+    };
+
+    let trigger = frame_select_trigger_content(
+        "audio-tracks-select",
+        "源轨道",
+        div()
+            .flex_1()
+            .min_w_0()
+            .truncate()
+            .pl(theme::ui_rem(FRAME_SELECT_VALUE_INDENT))
+            .text_color(color(palette.text_primary))
+            .child(theme::ui_text(value.as_str())),
+        enabled,
+        expanded,
+        palette,
+        window,
+        cx,
+    )
+    .on_click(cx.listener(move |root, event: &ClickEvent, _window, cx| {
+        cx.stop_propagation();
+        if event.is_keyboard() {
+            return;
+        }
+        root.toggle_audio_tracks_popover();
+        cx.notify();
+    }))
+    .on_key_down(
+        cx.listener(move |root, event: &gpui::KeyDownEvent, _window, cx| {
+            if !enabled {
+                return;
+            }
+            match event.keystroke.key.as_str() {
+                "enter" | "space" => {
+                    cx.stop_propagation();
+                    root.toggle_audio_tracks_popover();
                     cx.notify();
                 }
-            })),
+                "escape" => {
+                    cx.stop_propagation();
+                    root.close_audio_tracks_popover();
+                    cx.notify();
+                }
+                _ => {}
+            }
+        }),
+    );
+
+    let mut right = div()
+        .relative()
+        .flex_none()
+        .w(relative(0.75))
+        .child(trigger);
+
+    if tracks_popover != PopoverState::Hidden && track_count > 0 {
+        let progress =
+            audio_tracks_popover_progress(tracks_popover == PopoverState::Open, window, cx);
+        let ideal_height = (frame_select_content_height(track_count) + 8.0).min(328.0);
+        let mut list = frame_select_options_list("audio-tracks-select-options-list", tracks_scroll)
+            .max_h(theme::ui_rem(ideal_height - 8.0));
+        for option in track_options {
+            list = list.child(settings_audio_track_button(option, palette, window, cx));
+        }
+        let list = div().pt(theme::ui_rem(8.0)).child(list);
+        let mut popover = frame_select_popover(
+            "audio-tracks-select-options",
+            AUDIO_TRACKS_POPOVER_TOP_OFFSET + subtitle_popover_slide_offset(progress),
+            progress,
+            list,
+            palette,
+        )
+        .max_h(theme::ui_rem(ideal_height))
+        .on_key_down(
+            cx.listener(move |root, event: &gpui::KeyDownEvent, _window, cx| {
+                if event.keystroke.key.as_str() == "escape" {
+                    cx.stop_propagation();
+                    root.close_audio_tracks_popover();
+                    cx.notify();
+                }
+            }),
         );
+        if !palette.is_light() {
+            popover = popover.shadow(audio_select_popover_shadows(palette));
+        }
+
+        right = right.child(deferred(popover).with_priority(10));
     }
 
-    grid
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .flex_none()
+                .w(theme::ui_rem(64.0))
+                .min_w_0()
+                .truncate()
+                .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+                .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+                .text_color(color(palette.text_primary))
+                .child(theme::ui_text("源轨道")),
+        )
+        .child(right)
+}
+
+const AUDIO_TRACKS_POPOVER_TOP_OFFSET: f32 = crate::SETTINGS_CONTROL_HEIGHT + 4.0;
+
+fn audio_tracks_popover_progress(
+    is_open: bool,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> f32 {
+    let transition = window
+        .use_keyed_transition(
+            "settings-audio-tracks-popover-motion",
+            cx,
+            INTERACTION_MOTION_DURATION,
+            |_window, _cx| 0.0_f32,
+        )
+        .with_easing(ease_in_out);
+    set_motion_target(&transition, motion_target(is_open), cx);
+    let progress = *transition.evaluate(window, cx);
+
+    if !is_open && motion_is_hidden(progress) {
+        cx.defer_in(window, move |root, _window, cx| {
+            if root.finish_audio_tracks_popover_close() {
+                cx.notify();
+            }
+        });
+    }
+
+    progress
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -130,92 +455,6 @@ impl Render for SettingsAudioRangeDragPreview {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         div().w(theme::ui_rem(0.0)).h(theme::ui_rem(0.0))
     }
-}
-
-struct SettingsAudioRangeSpec {
-    label: &'static str,
-    value_label: String,
-    value: u32,
-    min: u32,
-    max: u32,
-    lower_label: &'static str,
-    upper_label: &'static str,
-    target: SettingsAudioRangeTarget,
-}
-
-fn settings_audio_encoding_controls(
-    config: &ConversionConfig,
-    settings_disabled: bool,
-    audio_bitrate_focus: Option<&FocusHandle>,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let controls_disabled = settings_disabled || config.processing_mode == ProcessingMode::Copy;
-    let is_lossless = is_lossless_audio_codec(&config.audio_codec);
-    let show_vbr_toggle = !is_lossless && audio_codec_supports_vbr(&config.audio_codec);
-    let is_vbr = show_vbr_toggle && config.audio_bitrate_mode == "vbr";
-
-    let mut controls = div().flex().flex_col().gap_3();
-    if show_vbr_toggle {
-        controls = controls
-            .child(settings_field_label("质量控制", palette))
-            .child(settings_audio_bitrate_mode_grid(
-                config,
-                controls_disabled,
-                palette,
-                window,
-                cx,
-            ));
-    }
-
-    if is_vbr {
-        if let Some(range) = audio_quality_range(&config.audio_codec) {
-            let value = parse_audio_value(&config.audio_quality, range.default_value)
-                .clamp(range.min, range.max);
-            let lower_label = if range.lower_is_better {
-                "最佳"
-            } else {
-                "最小"
-            };
-            let upper_label = if range.lower_is_better {
-                "最小"
-            } else {
-                "最佳"
-            };
-            controls = controls.child(settings_audio_field_divider(palette)).child(
-                settings_audio_range_field(
-                    SettingsAudioRangeSpec {
-                        label: "质量等级",
-                        value_label: format!("Q {value}"),
-                        value,
-                        min: range.min,
-                        max: range.max,
-                        lower_label,
-                        upper_label,
-                        target: SettingsAudioRangeTarget::Quality,
-                    },
-                    controls_disabled,
-                    palette,
-                    cx,
-                ),
-            );
-        }
-    } else {
-        controls = controls.child(settings_audio_field_divider(palette)).child(
-            settings_audio_bitrate_field(
-                config,
-                controls_disabled || is_lossless,
-                is_lossless,
-                audio_bitrate_focus,
-                palette,
-                window,
-                cx,
-            ),
-        );
-    }
-
-    controls
 }
 
 fn settings_audio_bitrate_mode_grid(
@@ -291,96 +530,6 @@ fn settings_audio_mode_badge_element(
                 .line_height(theme::ui_rem(12.0))
                 .when(enabled, gpui::Styled::cursor_pointer)
                 .child(theme::ui_text(label)),
-        )
-}
-
-fn settings_audio_bitrate_field(
-    config: &ConversionConfig,
-    disabled: bool,
-    is_lossless: bool,
-    audio_bitrate_focus: Option<&FocusHandle>,
-    palette: &'static theme::ThemePalette,
-    window: &Window,
-    cx: &Context<FrameRoot>,
-) -> gpui::Div {
-    div()
-        .flex()
-        .items_center()
-        .gap_3()
-        .child(
-            div()
-                .flex_none()
-                .whitespace_nowrap()
-                .child(settings_field_label("码率 (kbps)", palette)),
-        )
-        .child(div().flex_1().min_w_0().child(frame_text_input(
-            FrameTextInputSpec {
-                id: "settings-audio-bitrate-field",
-                value: if is_lossless {
-                    ""
-                } else {
-                    &config.audio_bitrate
-                },
-                placeholder: if is_lossless {
-                    "忽略码率"
-                } else {
-                    "128"
-                },
-                disabled,
-                focus: audio_bitrate_focus,
-                kind: FrameTextInputKind::AudioBitrate,
-            },
-            palette,
-            window,
-            cx,
-        )))
-}
-
-/// 值控件（码率输入框 / 质量滑条）上方的淡分隔线：与节标题分隔线同款（1px canvas + 阴影），
-/// 把「码率 / 质量」这一行与上面的「目标码率 / 可变码率」切换在视觉上分开。
-fn settings_audio_field_divider(palette: &'static theme::ThemePalette) -> gpui::Div {
-    div()
-        .h(gpui::px(1.0))
-        .w_full()
-        .bg(color(palette.canvas))
-        .shadow(horizontal_separator_shadows(palette))
-}
-
-fn settings_audio_range_field(
-    spec: SettingsAudioRangeSpec,
-    disabled: bool,
-    palette: &'static theme::ThemePalette,
-    cx: &Context<FrameRoot>,
-) -> gpui::Div {
-    div()
-        .flex()
-        .flex_col()
-        .gap_2()
-        .child(
-            div()
-                .flex()
-                .items_end()
-                .justify_between()
-                .child(settings_field_label(spec.label, palette))
-                .child(settings_value_badge(spec.value_label, palette)),
-        )
-        .child(settings_audio_range_slider(
-            spec.value,
-            spec.min,
-            spec.max,
-            disabled,
-            spec.target,
-            palette,
-            cx,
-        ))
-        .child(
-            div()
-                .flex()
-                .justify_between()
-                .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-                .text_color(color(palette.text_muted))
-                .child(theme::ui_text(spec.lower_label))
-                .child(theme::ui_text(spec.upper_label)),
         )
 }
 
@@ -502,53 +651,6 @@ fn settings_audio_range_handle(
     } else {
         handle
     }
-}
-
-pub(in crate::app) fn settings_audio_codec_list(
-    config: &ConversionConfig,
-    available_encoders: &AvailableEncoders,
-    settings_disabled: bool,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Div {
-    let mut list = div().grid().grid_cols(1);
-    for option in audio_codec_options(config, available_encoders, settings_disabled) {
-        list = list.child(settings_audio_codec_button(option, palette, window, cx));
-    }
-
-    list
-}
-
-pub(in crate::app) fn settings_audio_codec_button(
-    option: crate::settings::AudioCodecOption,
-    palette: &'static theme::ThemePalette,
-    window: &mut Window,
-    cx: &mut Context<FrameRoot>,
-) -> gpui::Stateful<gpui::Div> {
-    let codec = option.codec;
-    let is_enabled = !option.is_disabled;
-    let caption = option.disabled_reason.unwrap_or(option.label);
-
-    frame_list_item_with_caption(
-        format!("audio-codec-{codec}"),
-        codec,
-        caption,
-        option.is_selected,
-        is_enabled,
-        palette,
-        window,
-        cx,
-    )
-    .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
-        cx.stop_propagation();
-        if !is_enabled {
-            return;
-        }
-        if root.update_selected_config(|config| apply_audio_codec(config, codec)) {
-            cx.notify();
-        }
-    }))
 }
 
 pub(in crate::app) fn settings_audio_track_button(

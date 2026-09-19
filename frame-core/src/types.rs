@@ -322,6 +322,9 @@ pub struct ConversionConfig {
     #[serde(default = "default_audio_quality")]
     pub audio_quality: String,
     pub audio_channels: String,
+    /// 音频采样率：`original`＝不发 `-ar`（跟随源）；否则为具体 Hz（`44100`/`48000`/`96000`）。
+    #[serde(default = "default_audio_sample_rate")]
+    pub audio_sample_rate: String,
     #[serde(default = "default_audio_volume")]
     pub audio_volume: f64,
     #[serde(default)]
@@ -468,6 +471,10 @@ fn default_audio_bitrate_mode() -> String {
 
 fn default_audio_quality() -> String {
     "4".to_string()
+}
+
+fn default_audio_sample_rate() -> String {
+    "original".to_string()
 }
 
 fn default_nvenc_multipass() -> String {

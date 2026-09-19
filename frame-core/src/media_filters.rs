@@ -505,6 +505,7 @@ mod tests {
             audio_bitrate_mode: "bitrate".to_string(),
             audio_quality: "4".to_string(),
             audio_channels: "original".to_string(),
+            audio_sample_rate: "original".to_string(),
             audio_volume: 100.0,
             audio_normalize: false,
             video_filters: VideoFiltersConfig::default(),

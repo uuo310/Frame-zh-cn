@@ -4004,6 +4004,10 @@ mod preview_shell {
         &FILTERS
     }
 
+    #[expect(
+        clippy::too_many_lines,
+        reason = "The fixture lists every SettingsRenderState field explicitly."
+    )]
     fn settings_state<'a>(
         config: &'a ConversionConfig,
         metadata: Option<&'a SourceMetadata>,
@@ -4018,6 +4022,11 @@ mod preview_shell {
         let video_scaling_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let video_fps_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let video_profile_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let audio_codec_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let audio_bitrate_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let audio_sample_rate_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let audio_channels_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let audio_tracks_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
 
         SettingsRenderState {
             palette: theme::palette(crate::appearance::ColorTheme::Dark),
@@ -4035,7 +4044,6 @@ mod preview_shell {
             settings_disabled: false,
             output_name: "",
             output_name_focus: None,
-            audio_bitrate_focus: None,
             video_width_focus: None,
             video_height_focus: None,
             video_bitrate_focus: None,
@@ -4122,6 +4130,52 @@ mod preview_shell {
                     last_option: None,
                 },
             },
+            audio_codec_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: audio_codec_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            audio_bitrate_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: audio_bitrate_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            audio_sample_rate_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: audio_sample_rate_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            audio_channels_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: audio_channels_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            audio_tracks_popover: PopoverState::Hidden,
+            audio_tracks_select_scroll: audio_tracks_select_scroll_handle,
             metadata_focuses: SettingsMetadataInputFocuses {
                 title: None,
                 artist: None,

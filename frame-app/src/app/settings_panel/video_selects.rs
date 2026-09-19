@@ -1,23 +1,23 @@
-use super::{
-    BoxShadow, ClickEvent, Context, FrameRoot, InteractiveElement, MouseMoveEvent, ParentElement,
-    PopoverState, SettingsVideoSelectUi, StatefulInteractiveElement, Styled, Window,
-    apply_frame_select_popover_focus_trap, button_highlight_shadows, color, deferred, div,
-    ease_in_out, focus_frame_select_initial_target, frame_select_content_height,
-    frame_select_last_focus,
-    frame_select_option_focus, frame_select_option_with_caption,
-    frame_select_option_with_caption_and_focus, frame_select_options_list, frame_select_popover,
-    frame_select_trigger_content, frame_select_trigger_content_with_focus, frame_highlight_px,
-    frame_tooltip, frame_vertical_scrollbar_subtle, point, px, theme, FRAME_SELECT_VALUE_INDENT,
-};
 use super::super::motion::{
     INTERACTION_MOTION_DURATION, motion_is_hidden, motion_target, set_motion_target,
     subtitle_popover_slide_offset,
 };
+use super::{
+    BoxShadow, ClickEvent, Context, FRAME_SELECT_VALUE_INDENT, FluentBuilder, FrameRoot,
+    InteractiveElement, MouseMoveEvent, ParentElement, PopoverState, SettingsVideoSelectUi,
+    StatefulInteractiveElement, Styled, Window, apply_frame_select_popover_focus_trap,
+    button_highlight_shadows, color, deferred, div, ease_in_out, focus_frame_select_initial_target,
+    frame_highlight_px, frame_select_content_height, frame_select_last_focus,
+    frame_select_option_focus, frame_select_option_with_caption,
+    frame_select_option_with_caption_and_focus, frame_select_options_list, frame_select_popover,
+    frame_select_trigger_content, frame_select_trigger_content_with_focus, frame_tooltip,
+    frame_vertical_scrollbar_subtle, point, px, theme,
+};
+use crate::SETTINGS_CONTROL_HEIGHT;
 use crate::settings::{
     apply_fps, apply_nvenc_h264_profile, apply_pixel_format, apply_resolution,
     apply_scaling_algorithm, apply_video_codec, apply_video_preset, apply_x264_profile,
 };
-use crate::SETTINGS_CONTROL_HEIGHT;
 use gpui::{FocusHandle, relative};
 
 pub(in crate::app) const VIDEO_SELECT_TRIGGER_WIDTH_RATIO: f32 = 0.75;
@@ -26,8 +26,7 @@ pub(in crate::app) const VIDEO_SELECT_LABEL_COLUMN_WIDTH: f32 = 64.0;
 /// （`{control_id}-option-{id}`），空串会留下悬空后缀 ⇒ 用具名 id，提交时映射回空串。
 pub(in crate::app) const VIDEO_PROFILE_AUTO_OPTION_ID: &str = "auto";
 const VIDEO_SELECT_POPOVER_GAP: f32 = 4.0;
-const VIDEO_SELECT_POPOVER_TOP_OFFSET: f32 =
-    SETTINGS_CONTROL_HEIGHT + VIDEO_SELECT_POPOVER_GAP;
+const VIDEO_SELECT_POPOVER_TOP_OFFSET: f32 = SETTINGS_CONTROL_HEIGHT + VIDEO_SELECT_POPOVER_GAP;
 const VIDEO_SELECT_POPOVER_TOP_BUFFER: f32 = 8.0;
 const VIDEO_SELECT_POPOVER_MAX_HEIGHT: f32 = 320.0;
 const VIDEO_SELECT_POPOVER_MIN_HEIGHT: f32 = 96.0;
@@ -181,6 +180,8 @@ pub(in crate::app) struct VideoSelectRowState<'a> {
     pub(in crate::app) id: VideoSelectId,
     pub(in crate::app) options: Vec<VideoSelectOption>,
     pub(in crate::app) selected_label: String,
+    /// 触发器值的尾随小字（如 分辨率「原始 3840×2160」）；仅分辨率/帧率行按需传入。
+    pub(in crate::app) value_suffix: Option<String>,
     pub(in crate::app) enabled: bool,
     pub(in crate::app) tooltip_visible_id: Option<&'a str>,
     pub(in crate::app) palette: &'static theme::ThemePalette,
@@ -200,6 +201,7 @@ pub(in crate::app) fn video_select_row(
         id,
         options,
         selected_label,
+        value_suffix,
         enabled,
         tooltip_visible_id,
         palette,
@@ -211,7 +213,7 @@ pub(in crate::app) fn video_select_row(
         frame_select_trigger_content_with_focus(
             control_id,
             id.label(),
-            video_select_value_content(&selected_label, palette),
+            video_select_value_content(&selected_label, value_suffix.as_deref(), palette),
             enabled,
             expanded,
             focus,
@@ -223,7 +225,7 @@ pub(in crate::app) fn video_select_row(
         frame_select_trigger_content(
             control_id,
             id.label(),
-            video_select_value_content(&selected_label, palette),
+            video_select_value_content(&selected_label, value_suffix.as_deref(), palette),
             enabled,
             expanded,
             palette,
@@ -243,13 +245,14 @@ pub(in crate::app) fn video_select_row(
     let option_count = options.len();
 
     let trigger = trigger
-        .on_mouse_move(cx.listener(move |root, event: &MouseMoveEvent, _window, _cx| {
-            if root.video_select_placement_frozen(id) {
-                return;
-            }
-            root.settings_ui.video_select_anchor_y[id.slot()] =
-                Some(event.position.y.as_f32());
-        }))
+        .on_mouse_move(
+            cx.listener(move |root, event: &MouseMoveEvent, _window, _cx| {
+                if root.video_select_placement_frozen(id) {
+                    return;
+                }
+                root.settings_ui.video_select_anchor_y[id.slot()] = Some(event.position.y.as_f32());
+            }),
+        )
         .on_click(cx.listener(move |root, event: &ClickEvent, _window, cx| {
             cx.stop_propagation();
             if event.is_keyboard() {
@@ -319,12 +322,8 @@ pub(in crate::app) fn video_select_row(
         .child(trigger);
 
     if ui.popover != PopoverState::Hidden && !options.is_empty() {
-        let progress = video_select_popover_progress(
-            id,
-            ui.popover == PopoverState::Open,
-            window,
-            cx,
-        );
+        let progress =
+            video_select_popover_progress(id, ui.popover == PopoverState::Open, window, cx);
         let ideal_height =
             frame_select_content_height(options.len()) + VIDEO_SELECT_POPOVER_TOP_BUFFER;
         let rem_factor = window.rem_size().as_f32() / crate::appearance::BASE_REM_PX;
@@ -366,6 +365,7 @@ pub(in crate::app) fn video_select_row(
                     format!("{control_id}-option-{option_id}"),
                     option.label.clone(),
                     option.caption.clone(),
+                    theme::TEXT_UI_BASE_SIZE,
                     option.selected,
                     option.enabled,
                     focus,
@@ -375,6 +375,7 @@ pub(in crate::app) fn video_select_row(
                     format!("{control_id}-option-{option_id}"),
                     option.label.clone(),
                     option.caption.clone(),
+                    theme::TEXT_UI_BASE_SIZE,
                     option.selected,
                     option.enabled,
                     palette,
@@ -391,25 +392,27 @@ pub(in crate::app) fn video_select_row(
                             cx.notify();
                         }
                     }))
-                    .on_key_down(cx.listener(move |root, event: &gpui::KeyDownEvent, _window, cx| {
-                        if !option_enabled {
-                            return;
-                        }
-                        match event.keystroke.key.as_str() {
-                            "enter" | "space" => {
-                                cx.stop_propagation();
-                                if root.commit_video_select(id, option_id) {
+                    .on_key_down(cx.listener(
+                        move |root, event: &gpui::KeyDownEvent, _window, cx| {
+                            if !option_enabled {
+                                return;
+                            }
+                            match event.keystroke.key.as_str() {
+                                "enter" | "space" => {
+                                    cx.stop_propagation();
+                                    if root.commit_video_select(id, option_id) {
+                                        cx.notify();
+                                    }
+                                }
+                                "escape" => {
+                                    cx.stop_propagation();
+                                    root.close_video_select(id);
                                     cx.notify();
                                 }
+                                _ => {}
                             }
-                            "escape" => {
-                                cx.stop_propagation();
-                                root.close_video_select(id);
-                                cx.notify();
-                            }
-                            _ => {}
-                        }
-                    })),
+                        },
+                    )),
             );
         }
 
@@ -422,13 +425,8 @@ pub(in crate::app) fn video_select_row(
         } else {
             VIDEO_SELECT_POPOVER_TOP_OFFSET + subtitle_popover_slide_offset(progress)
         };
-        let mut popover = frame_select_popover(
-            id.options_id(),
-            popover_top,
-            progress,
-            list,
-            palette,
-        );
+        let mut popover =
+            frame_select_popover(id.options_id(), popover_top, progress, list, palette);
         popover = apply_frame_select_popover_focus_trap(
             popover,
             ui.focuses.panel,
@@ -491,15 +489,37 @@ pub(in crate::app) fn video_select_row(
 
 fn video_select_value_content(
     selected_label: &str,
+    value_suffix: Option<&str>,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Div {
+    let muted = color(palette.text_muted);
     div()
         .flex_1()
         .min_w_0()
-        .truncate()
         .pl(theme::ui_rem(FRAME_SELECT_VALUE_INDENT))
+        .flex()
+        .items_center()
+        .gap_2()
         .text_color(color(palette.text_primary))
-        .child(theme::ui_text(selected_label))
+        .child(
+            div()
+                .min_w_0()
+                .truncate()
+                .child(theme::ui_text(selected_label)),
+        )
+        .when_some(value_suffix, |this, suffix| {
+            this.child(
+                div()
+                    .flex_none()
+                    .max_w(theme::ui_rem(140.0))
+                    .truncate()
+                    .text_size(theme::ui_rem(theme::TEXT_HINT_SIZE))
+                    .font_weight(theme::TEXT_WEIGHT_REGULAR)
+                    .text_color(muted)
+                    .child(theme::ui_text(suffix)),
+            )
+        })
+        .child(div().flex_1())
 }
 
 fn video_select_popover_shadows(palette: &'static theme::ThemePalette) -> Vec<BoxShadow> {
@@ -591,9 +611,7 @@ impl FrameRoot {
     fn video_select_popover_mut(&mut self, id: VideoSelectId) -> &mut PopoverState {
         match id {
             VideoSelectId::Codec => &mut self.settings_ui.video_codec_select_popover,
-            VideoSelectId::PixelFormat => {
-                &mut self.settings_ui.video_pixel_format_select_popover
-            }
+            VideoSelectId::PixelFormat => &mut self.settings_ui.video_pixel_format_select_popover,
             VideoSelectId::Preset => &mut self.settings_ui.video_preset_select_popover,
             VideoSelectId::Resolution => &mut self.settings_ui.video_resolution_select_popover,
             VideoSelectId::Scaling => &mut self.settings_ui.video_scaling_select_popover,
@@ -656,7 +674,11 @@ impl FrameRoot {
         false
     }
 
-    pub(in crate::app) fn commit_video_select(&mut self, id: VideoSelectId, option_id: &str) -> bool {
+    pub(in crate::app) fn commit_video_select(
+        &mut self,
+        id: VideoSelectId,
+        option_id: &str,
+    ) -> bool {
         let changed = match id {
             VideoSelectId::Codec => {
                 self.update_selected_config(|config| apply_video_codec(config, option_id))
@@ -673,7 +695,9 @@ impl FrameRoot {
             VideoSelectId::Scaling => {
                 self.update_selected_config(|config| apply_scaling_algorithm(config, option_id))
             }
-            VideoSelectId::Fps => self.update_selected_config(|config| apply_fps(config, option_id)),
+            VideoSelectId::Fps => {
+                self.update_selected_config(|config| apply_fps(config, option_id))
+            }
             VideoSelectId::Profile => self.update_selected_config(|config| {
                 let value = if option_id == VIDEO_PROFILE_AUTO_OPTION_ID {
                     ""

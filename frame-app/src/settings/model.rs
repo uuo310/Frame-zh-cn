@@ -22,10 +22,12 @@ pub const DEFAULT_IMAGE_TIFF_COMPRESSION: &str = "packbits";
 pub const DEFAULT_GIF_COLORS: u16 = 256;
 pub const DEFAULT_GIF_DITHER: &str = "sierra2_4a";
 pub const DEFAULT_GIF_LOOP: u16 = 0;
-pub const DEFAULT_AUDIO_BITRATE: &str = "128";
+pub const DEFAULT_AUDIO_BITRATE: &str = "192";
 pub const DEFAULT_AUDIO_BITRATE_MODE: &str = "bitrate";
 pub const DEFAULT_AUDIO_QUALITY: &str = "4";
 pub const DEFAULT_AUDIO_CHANNELS: &str = "original";
+/// 音频采样率默认「原始」＝不发 `-ar`（跟随源）。
+pub const DEFAULT_AUDIO_SAMPLE_RATE: &str = "original";
 pub const DEFAULT_AUDIO_VOLUME: u32 = 100;
 pub const DEFAULT_VIDEO_FILTER_TEMPERATURE: u32 = 6500;
 pub const DEFAULT_VIDEO_FILTER_SHARPEN: u32 = 25;
@@ -632,6 +634,8 @@ pub struct ConversionConfig {
     pub audio_bitrate_mode: String,
     pub audio_quality: String,
     pub audio_channels: String,
+    /// 音频采样率：`original`＝不发 `-ar`（跟随源）；否则为具体 Hz。
+    pub audio_sample_rate: String,
     pub audio_volume: u32,
     pub audio_normalize: bool,
     pub video_filters: VideoFiltersConfig,
@@ -706,6 +710,7 @@ impl Default for ConversionConfig {
             audio_bitrate_mode: DEFAULT_AUDIO_BITRATE_MODE.to_string(),
             audio_quality: DEFAULT_AUDIO_QUALITY.to_string(),
             audio_channels: DEFAULT_AUDIO_CHANNELS.to_string(),
+            audio_sample_rate: DEFAULT_AUDIO_SAMPLE_RATE.to_string(),
             audio_volume: DEFAULT_AUDIO_VOLUME,
             audio_normalize: false,
             video_filters: VideoFiltersConfig::default(),
@@ -831,10 +836,32 @@ pub struct AudioCodecOption {
     pub disabled_reason: Option<&'static str>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AudioChannelOption {
     pub id: &'static str,
-    pub label: &'static str,
+    pub label: String,
+    /// 「原始」的落点副行小字（如 立体声/5.1）；其余声道为空。
+    pub caption: String,
+    pub is_selected: bool,
+    pub is_disabled: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AudioBitrateOption {
+    pub value: String,
+    pub label: String,
+    /// 下拉选项副文本；仅「与当前输出声道不匹配的存量档位」标注「当前值」。
+    pub caption: String,
+    pub is_selected: bool,
+    pub is_disabled: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AudioSampleRateOption {
+    pub value: String,
+    pub label: String,
+    /// 「原始」的源率副行小字（如 48 kHz、44.1/48 kHz）；具体档与其余为空。
+    pub caption: String,
     pub is_selected: bool,
     pub is_disabled: bool,
 }
@@ -1031,11 +1058,11 @@ pub(super) const AUDIO_CODEC_DEFINITIONS: [AudioCodecDefinition; 9] = [
     },
     AudioCodecDefinition {
         codec: "alac",
-        label: "ALAC（无损）",
+        label: "ALAC (无损)",
     },
     AudioCodecDefinition {
         codec: "flac",
-        label: "FLAC（无损）",
+        label: "FLAC (无损)",
     },
     AudioCodecDefinition {
         codec: "pcm_s16le",
@@ -1047,7 +1074,7 @@ pub(super) const AUDIO_CODEC_DEFINITIONS: [AudioCodecDefinition; 9] = [
     },
     AudioCodecDefinition {
         codec: "pcm_bluray",
-        label: "Blu-ray PCM（无损）",
+        label: "Blu-ray PCM (无损)",
     },
 ];
 
@@ -1083,6 +1110,50 @@ pub(super) const AUDIO_CHANNEL_DEFINITIONS: [AudioChannelDefinition; 3] = [
         label: "单声道",
     },
 ];
+
+/// 立体声/单声道输出的通用码率档（专业常见值短表，用户改定）。
+pub(super) const AUDIO_BITRATE_STEREO_TABLE: &[&str] = &["192", "256", "320"];
+/// AC3 多声道（5.1）输出的大码率档；仅 AC3 启用（AAC 不设多声道组）。
+pub(super) const AUDIO_BITRATE_MULTICHANNEL_TABLE: &[&str] = &["384", "448", "640"];
+/// Opus 码率档（2026-09-19 改定：弃 128 增 256）。
+pub(super) const AUDIO_BITRATE_OPUS_TABLE: &[&str] = &["160", "192", "256"];
+
+/// 当前 (编码 × 输出声道) 的码率档；`None`＝无损编码，无码率概念（整行隐藏）。
+pub(super) fn audio_bitrate_table(
+    codec: &str,
+    multichannel_output: bool,
+) -> Option<&'static [&'static str]> {
+    match codec {
+        "aac" | "mp3" | "mp2" => Some(AUDIO_BITRATE_STEREO_TABLE),
+        "libopus" => Some(AUDIO_BITRATE_OPUS_TABLE),
+        "ac3" => Some(if multichannel_output {
+            AUDIO_BITRATE_MULTICHANNEL_TABLE
+        } else {
+            AUDIO_BITRATE_STEREO_TABLE
+        }),
+        _ => None,
+    }
+}
+
+/// 与输出声道无关的「并集」码率档：加载归一化拿不到源元数据，用它吸附表外旧值；
+/// 与当前输出声道不匹配的档位由选项层追加「当前值」如实展示，不做静默改写。
+pub(super) fn audio_bitrate_union_table(codec: &str) -> Option<&'static [&'static str]> {
+    match codec {
+        "aac" | "mp3" | "mp2" => Some(AUDIO_BITRATE_STEREO_TABLE),
+        "libopus" => Some(AUDIO_BITRATE_OPUS_TABLE),
+        "ac3" => Some(&["192", "256", "320", "384", "448", "640"]),
+        _ => None,
+    }
+}
+
+/// 当前编码可选的具体采样率档（Hz 字符串；「原始」由选项层统一补在首位）。
+pub(super) fn audio_sample_rate_table(codec: &str) -> &'static [&'static str] {
+    match codec {
+        "mp3" | "ac3" | "mp2" => &["44100", "48000"],
+        "libopus" => &["48000"],
+        _ => &["44100", "48000", "96000"],
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct VideoCodecDefinition {

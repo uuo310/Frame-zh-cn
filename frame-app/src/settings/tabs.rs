@@ -9,6 +9,17 @@ use super::{
     },
 };
 
+/// 字幕功能对当前源/容器是否可用（合并页据此决定是否在音频区下追加字幕区）。
+#[must_use]
+pub fn subtitles_tab_supported(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> bool {
+    let source_kind = source_kind_for(metadata);
+    !matches!(source_kind, SourceKind::Audio | SourceKind::Image)
+        && container_supports_subtitles(&config.container)
+}
+
 #[must_use]
 pub fn visible_settings_tabs(
     config: &ConversionConfig,
@@ -20,9 +31,6 @@ pub fn visible_settings_tabs(
     let is_copy_mode = config.processing_mode == ProcessingMode::Copy;
     let is_audio_container = is_audio_only_container(&config.container);
     let supports_audio = container_supports_audio(&config.container) && !is_source_image;
-    let supports_subtitles = !is_source_audio_only
-        && !is_source_image
-        && container_supports_subtitles(&config.container);
     let supports_video_tab =
         !is_source_audio_only && !is_source_image && !is_audio_container && !is_copy_mode;
     let supports_video_filters_tab = !is_source_audio_only && !is_audio_container && !is_copy_mode;
@@ -37,7 +45,8 @@ pub fn visible_settings_tabs(
             SettingsTab::Images => supports_images_tab,
             SettingsTab::Audio => supports_audio,
             SettingsTab::AudioFilters => supports_audio_filters_tab,
-            SettingsTab::Subtitles => supports_subtitles,
+            // 软合并：字幕页并入音频页（音频区上、字幕区下），rail 不再单列入口。
+            SettingsTab::Subtitles => false,
             SettingsTab::Source
             | SettingsTab::Output
             | SettingsTab::Metadata => true,
@@ -51,6 +60,12 @@ pub fn resolve_active_settings_tab(
     config: &ConversionConfig,
     metadata: Option<&SourceMetadata>,
 ) -> SettingsTab {
+    // 软合并：持久化的 Subtitles 活动页映射到合并页宿主 Audio。
+    let active_tab = if active_tab == SettingsTab::Subtitles {
+        SettingsTab::Audio
+    } else {
+        active_tab
+    };
     if visible_settings_tabs(config, metadata).contains(&active_tab) {
         active_tab
     } else {

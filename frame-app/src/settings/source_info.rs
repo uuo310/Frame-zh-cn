@@ -311,7 +311,7 @@ fn source_audio_track_rows(track: &AudioTrack) -> Vec<SourceInfoRow> {
 pub(super) fn audio_track_detail(track: &AudioTrack) -> String {
     let mut parts = Vec::new();
     if let Some(channels) = track.channels.as_deref().filter(|value| !value.is_empty()) {
-        parts.push(format!("{channels} channels"));
+        parts.push(format!("{channels} 声道"));
     }
     if let Some(language) = track.language.as_deref().filter(|value| !value.is_empty()) {
         parts.push(language.to_string());

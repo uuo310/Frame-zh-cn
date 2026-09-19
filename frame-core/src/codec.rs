@@ -233,9 +233,14 @@ pub fn add_audio_codec_args(args: &mut Vec<String>, config: &ConversionConfig) {
         _ => {}
     }
 
-    if matches!(config.audio_codec.as_str(), "mp2" | "pcm_bluray") {
-        args.push("-ar".to_string());
-        args.push("48000".to_string());
+    // 采样率：`original`＝不发 `-ar`（跟随源）；具体档位由设置层按编码白名单约束。
+    // （旧逻辑曾对 mp2|pcm_bluray 一律硬发 `-ar 48000`，现跟随用户选择。）
+    match config.audio_sample_rate.as_str() {
+        "44100" | "48000" | "96000" => {
+            args.push("-ar".to_string());
+            args.push(config.audio_sample_rate.clone());
+        }
+        _ => {}
     }
 }
 

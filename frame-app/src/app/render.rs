@@ -3,7 +3,7 @@ use super::files::FileDropLifecycleProbe;
 use super::preview_panel::{
     PreviewEditToolbarFocus, PreviewEditToolbarFocuses, PreviewToolFocuses, PreviewViewportFocuses,
 };
-use super::settings_panel::VideoSelectId;
+use super::settings_panel::{AudioSelectId, VideoSelectId};
 use super::*;
 use crate::app::chrome::UpdateDialogView;
 
@@ -185,8 +185,6 @@ impl Render for FrameRoot {
             Some(ActiveView::Workspace) => {
                 let output_name_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::OutputName, cx);
-                let audio_bitrate_focus =
-                    self.ensure_text_input_focus(FrameTextInputKind::AudioBitrate, cx);
                 let video_width_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::VideoCustomWidth, cx);
                 let video_height_focus =
@@ -345,6 +343,88 @@ impl Render for FrameRoot {
                 let video_profile_select_last_focus = self.ensure_focus(
                     FrameFocusKey::Control("video-profile-select-last-option".to_string()),
                     video_selects_enabled,
+                    cx,
+                );
+                let audio_selects_enabled = self.settings_ui.active_tab == SettingsTab::Audio
+                    && !self.file_queue.selected_file_locked();
+                let audio_codec_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-codec-select".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_codec_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-codec-select-panel".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_codec_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-codec-select-first-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_codec_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-codec-select-last-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_bitrate_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-bitrate-select".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_bitrate_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-bitrate-select-panel".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_bitrate_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-bitrate-select-first-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_bitrate_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-bitrate-select-last-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_sample_rate_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-sample_rate-select".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_sample_rate_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-sample_rate-select-panel".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_sample_rate_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-sample_rate-select-first-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_sample_rate_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-sample_rate-select-last-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_channels_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-channels-select".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_channels_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-channels-select-panel".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_channels_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-channels-select-first-option".to_string()),
+                    audio_selects_enabled,
+                    cx,
+                );
+                let audio_channels_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("audio-channels-select-last-option".to_string()),
+                    audio_selects_enabled,
                     cx,
                 );
                 let preview_start_time_focus =
@@ -575,7 +655,6 @@ impl Render for FrameRoot {
                     settings_disabled: self.file_queue.selected_file_locked(),
                     output_name: &selected_output_name,
                     output_name_focus: Some(&output_name_focus),
-                    audio_bitrate_focus: Some(&audio_bitrate_focus),
                     video_width_focus: Some(&video_width_focus),
                     video_height_focus: Some(&video_height_focus),
                     video_bitrate_focus: Some(&video_bitrate_focus),
@@ -662,6 +741,52 @@ impl Render for FrameRoot {
                             last_option: Some(&video_profile_select_last_focus),
                         },
                     },
+                    audio_codec_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.audio_codec_select_popover,
+                        scroll_handle: &self.settings_ui.audio_codec_select_scroll,
+                        anchor_y: self.audio_select_anchor_y(AudioSelectId::Codec),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&audio_codec_select_trigger_focus),
+                            panel: Some(&audio_codec_select_panel_focus),
+                            first_option: Some(&audio_codec_select_first_focus),
+                            last_option: Some(&audio_codec_select_last_focus),
+                        },
+                    },
+                    audio_bitrate_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.audio_bitrate_select_popover,
+                        scroll_handle: &self.settings_ui.audio_bitrate_select_scroll,
+                        anchor_y: self.audio_select_anchor_y(AudioSelectId::Bitrate),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&audio_bitrate_select_trigger_focus),
+                            panel: Some(&audio_bitrate_select_panel_focus),
+                            first_option: Some(&audio_bitrate_select_first_focus),
+                            last_option: Some(&audio_bitrate_select_last_focus),
+                        },
+                    },
+                    audio_sample_rate_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.audio_sample_rate_select_popover,
+                        scroll_handle: &self.settings_ui.audio_sample_rate_select_scroll,
+                        anchor_y: self.audio_select_anchor_y(AudioSelectId::SampleRate),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&audio_sample_rate_select_trigger_focus),
+                            panel: Some(&audio_sample_rate_select_panel_focus),
+                            first_option: Some(&audio_sample_rate_select_first_focus),
+                            last_option: Some(&audio_sample_rate_select_last_focus),
+                        },
+                    },
+                    audio_channels_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.audio_channels_select_popover,
+                        scroll_handle: &self.settings_ui.audio_channels_select_scroll,
+                        anchor_y: self.audio_select_anchor_y(AudioSelectId::Channels),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&audio_channels_select_trigger_focus),
+                            panel: Some(&audio_channels_select_panel_focus),
+                            first_option: Some(&audio_channels_select_first_focus),
+                            last_option: Some(&audio_channels_select_last_focus),
+                        },
+                    },
+                    audio_tracks_popover: self.settings_ui.audio_tracks_popover,
+                    audio_tracks_select_scroll: &self.settings_ui.audio_tracks_select_scroll,
                     metadata_focuses: SettingsMetadataInputFocuses {
                         title: Some(&metadata_title_focus),
                         artist: Some(&metadata_artist_focus),
@@ -825,6 +950,10 @@ impl Render for FrameRoot {
                     }
                     if root.video_select_any_open() {
                         root.close_video_selects();
+                        cx.notify();
+                    }
+                    if root.audio_select_any_open() {
+                        root.close_audio_selects();
                         cx.notify();
                     }
                     if root.settings_ui.bitrate_window_popover.is_open() {

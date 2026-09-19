@@ -1582,6 +1582,48 @@ mod tests {
         );
     }
 
+    #[test]
+    fn audio_sample_rate_original_emits_no_ar() {
+        let config = sample_config("mp4", "libx264");
+
+        let mut args = Vec::new();
+        add_audio_codec_args(&mut args, &config);
+
+        assert!(
+            !args.windows(2).any(|pair| pair[0] == "-ar"),
+            "「原始」不应发 -ar：{args:?}"
+        );
+    }
+
+    #[test]
+    fn audio_sample_rate_selection_emits_ar() {
+        let mut config = sample_config("mp4", "libx264");
+        config.audio_sample_rate = "48000".to_string();
+
+        let mut args = Vec::new();
+        add_audio_codec_args(&mut args, &config);
+
+        let position = args
+            .iter()
+            .position(|arg| arg == "-ar")
+            .expect("选定采样率应发 -ar");
+        assert_eq!(args[position + 1], "48000");
+    }
+
+    #[test]
+    fn bluray_no_longer_forces_48k() {
+        let mut config = sample_config("mov", "prores");
+        config.audio_codec = "pcm_bluray".to_string();
+
+        let mut args = Vec::new();
+        add_audio_codec_args(&mut args, &config);
+
+        assert!(
+            !args.windows(2).any(|pair| pair[0] == "-ar"),
+            "旧硬锁已拆：pcm_bluray 不再强制 -ar 48000：{args:?}"
+        );
+    }
+
     fn sample_config(container: &str, video_codec: &str) -> ConversionConfig {
         ConversionConfig {
             processing_mode: "reencode".to_string(),
@@ -1596,6 +1638,7 @@ mod tests {
             audio_bitrate_mode: "bitrate".to_string(),
             audio_quality: "4".to_string(),
             audio_channels: "original".to_string(),
+            audio_sample_rate: "original".to_string(),
             audio_volume: 100.0,
             audio_normalize: false,
             video_filters: crate::types::VideoFiltersConfig::default(),

@@ -339,7 +339,7 @@ mod audio_track_options {
             false,
         );
 
-        assert_eq!(options[0].detail, "2 channels • eng • Main");
+        assert_eq!(options[0].detail, "2 声道 • eng • Main");
     }
 
     #[test]
@@ -1220,13 +1220,10 @@ mod audio_codec_options {
     }
 
     #[test]
-    fn marks_flac_incompatible_for_mp4() {
+    fn hides_flac_incompatible_for_mp4() {
         let options = audio_codec_options(&ConversionConfig::default(), &encoders(), false);
 
-        assert_eq!(
-            codec_option(&options, "flac").disabled_reason,
-            Some("不兼容的封装格式")
-        );
+        assert!(options.iter().all(|option| option.codec != "flac"));
     }
 
     #[test]
@@ -1309,10 +1306,11 @@ mod audio_encoding_options {
     fn default_config_matches_original_audio_defaults() {
         let config = ConversionConfig::default();
 
-        assert_eq!(config.audio_bitrate, "128");
+        assert_eq!(config.audio_bitrate, "192");
         assert_eq!(config.audio_bitrate_mode, "bitrate");
         assert_eq!(config.audio_quality, "4");
         assert_eq!(config.audio_channels, "original");
+        assert_eq!(config.audio_sample_rate, "original");
         assert_eq!(config.audio_volume, 100);
         assert!(!config.audio_normalize);
     }
@@ -1405,7 +1403,10 @@ mod audio_encoding_options {
 
     #[test]
     fn apply_audio_bitrate_keeps_digits_only() {
-        let mut config = ConversionConfig::default();
+        let mut config = ConversionConfig {
+            audio_bitrate: "256".to_string(),
+            ..ConversionConfig::default()
+        };
 
         assert!(apply_audio_bitrate(&mut config, " 192k "));
 
@@ -2124,6 +2125,297 @@ mod source_info_sections {
     }
 }
 
+mod audio_dropdown_tables {
+    use super::*;
+
+    fn multichannel_metadata() -> SourceMetadata {
+        SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            audio_tracks: vec![AudioTrack {
+                index: 1,
+                channels: Some("6".to_string()),
+                ..AudioTrack::default()
+            }],
+            ..SourceMetadata::default()
+        }
+    }
+
+    fn values(options: Vec<crate::settings::AudioBitrateOption>) -> Vec<String> {
+        options.into_iter().map(|option| option.value).collect()
+    }
+
+    #[test]
+    fn bitrate_table_follows_codec() {
+        let config = ConversionConfig::default();
+
+        assert_eq!(
+            values(crate::settings::audio_bitrate_options(&config, None, false)),
+            vec!["192", "256", "320"]
+        );
+    }
+
+    #[test]
+    fn opus_uses_revised_table() {
+        let config = ConversionConfig {
+            audio_codec: "libopus".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        assert_eq!(
+            values(crate::settings::audio_bitrate_options(&config, None, false)),
+            vec!["160", "192", "256"]
+        );
+    }
+
+    #[test]
+    fn ac3_switches_group_with_output_channels() {
+        let mut config = ConversionConfig {
+            audio_codec: "ac3".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        assert_eq!(
+            values(crate::settings::audio_bitrate_options(&config, None, false)),
+            vec!["192", "256", "320"]
+        );
+
+        config.selected_audio_tracks = vec![1];
+        config.audio_bitrate = "448".to_string();
+        assert_eq!(
+            values(crate::settings::audio_bitrate_options(
+                &config,
+                Some(&multichannel_metadata()),
+                false
+            )),
+            vec!["384", "448", "640"]
+        );
+    }
+
+    #[test]
+    fn lossless_hides_bitrate_row() {
+        for codec in ["flac", "alac", "pcm_s16le", "pcm_bluray"] {
+            let config = ConversionConfig {
+                audio_codec: codec.to_string(),
+                ..ConversionConfig::default()
+            };
+            assert!(
+                crate::settings::audio_bitrate_options(&config, None, false).is_empty(),
+                "{codec} 应无码率行"
+            );
+        }
+    }
+
+    #[test]
+    fn out_of_context_bitrate_is_appended_as_current() {
+        let mut config = ConversionConfig {
+            audio_codec: "ac3".to_string(),
+            ..ConversionConfig::default()
+        };
+        config.audio_bitrate = "192".to_string();
+        config.selected_audio_tracks = vec![1];
+
+        let options =
+            crate::settings::audio_bitrate_options(&config, Some(&multichannel_metadata()), false);
+
+        assert_eq!(values(options.clone()), vec!["384", "448", "640", "192"]);
+        let last = options.last().unwrap();
+        assert!(last.is_selected);
+        assert_eq!(last.caption, "当前值");
+    }
+
+    #[test]
+    fn sample_rate_table_follows_codec() {
+        let aac = crate::settings::audio_sample_rate_options(&ConversionConfig::default(), None, false);
+        let aac_labels: Vec<String> = aac.into_iter().map(|option| option.label).collect();
+        assert_eq!(aac_labels, vec!["原始", "44.1 kHz", "48 kHz", "96 kHz"]);
+
+        let mp3 = crate::settings::audio_sample_rate_options(
+            &ConversionConfig {
+                audio_codec: "mp3".to_string(),
+                ..ConversionConfig::default()
+            },
+            None,
+            false,
+        );
+        let mp3_labels: Vec<String> = mp3.into_iter().map(|option| option.label).collect();
+        assert_eq!(mp3_labels, vec!["原始", "44.1 kHz", "48 kHz"]);
+
+        let opus = crate::settings::audio_sample_rate_options(
+            &ConversionConfig {
+                audio_codec: "libopus".to_string(),
+                ..ConversionConfig::default()
+            },
+            None,
+            false,
+        );
+        let opus_labels: Vec<String> = opus.into_iter().map(|option| option.label).collect();
+        assert_eq!(opus_labels, vec!["原始", "48 kHz"]);
+    }
+
+    #[test]
+    fn original_channel_fallback_clamps_to_encoder() {
+        let source = |channels: &str| SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            audio_tracks: vec![AudioTrack {
+                index: 1,
+                channels: Some(channels.to_string()),
+                ..AudioTrack::default()
+            }],
+            ..SourceMetadata::default()
+        };
+
+        let ac3 = ConversionConfig {
+            audio_codec: "ac3".to_string(),
+            selected_audio_tracks: vec![1],
+            ..ConversionConfig::default()
+        };
+        assert_eq!(
+            crate::settings::audio_original_channel_fallback(&ac3, Some(&source("8"))).as_deref(),
+            Some("5.1"),
+            "7.1 源 + AC3 应按编码器上限显示 5.1"
+        );
+
+        let aac = ConversionConfig {
+            selected_audio_tracks: vec![1],
+            ..ConversionConfig::default()
+        };
+        assert_eq!(
+            crate::settings::audio_original_channel_fallback(&aac, Some(&source("6"))).as_deref(),
+            Some("5.1")
+        );
+        assert_eq!(
+            crate::settings::audio_original_channel_fallback(&aac, Some(&source("8"))).as_deref(),
+            Some("7.1")
+        );
+    }
+
+    #[test]
+    fn sample_rate_original_fallback_lists_source_rates() {
+        let single = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            audio_tracks: vec![AudioTrack {
+                index: 1,
+                sample_rate: Some("48000".to_string()),
+                ..AudioTrack::default()
+            }],
+            ..SourceMetadata::default()
+        };
+        let config = ConversionConfig {
+            selected_audio_tracks: vec![1],
+            ..ConversionConfig::default()
+        };
+
+        let options =
+            crate::settings::audio_sample_rate_options(&config, Some(&single), false);
+        assert_eq!(options[0].label, "原始");
+        assert_eq!(options[0].caption, "48 kHz");
+
+        let mixed = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            audio_tracks: vec![
+                AudioTrack {
+                    index: 1,
+                    sample_rate: Some("48000".to_string()),
+                    ..AudioTrack::default()
+                },
+                AudioTrack {
+                    index: 2,
+                    sample_rate: Some("44100".to_string()),
+                    ..AudioTrack::default()
+                },
+            ],
+            ..SourceMetadata::default()
+        };
+        let multi = ConversionConfig {
+            selected_audio_tracks: vec![1, 2],
+            ..ConversionConfig::default()
+        };
+        let options = crate::settings::audio_sample_rate_options(&multi, Some(&mixed), false);
+        assert_eq!(options[0].label, "原始");
+        assert_eq!(options[0].caption, "44.1/48 kHz");
+    }
+
+    #[test]
+    fn channel_original_fallback_lists_clamped_layouts_for_mixed_tracks() {
+        let metadata = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            audio_tracks: vec![
+                AudioTrack {
+                    index: 1,
+                    channels: Some("2".to_string()),
+                    ..AudioTrack::default()
+                },
+                AudioTrack {
+                    index: 2,
+                    channels: Some("6".to_string()),
+                    ..AudioTrack::default()
+                },
+            ],
+            ..SourceMetadata::default()
+        };
+        let ac3 = ConversionConfig {
+            audio_codec: "ac3".to_string(),
+            selected_audio_tracks: vec![1, 2],
+            ..ConversionConfig::default()
+        };
+
+        assert_eq!(
+            crate::settings::audio_original_channel_fallback(&ac3, Some(&metadata)).as_deref(),
+            Some("立体声/5.1"),
+            "混合多轨逐值列举"
+        );
+
+        let mp3 = ConversionConfig {
+            audio_codec: "mp3".to_string(),
+            selected_audio_tracks: vec![1, 2],
+            ..ConversionConfig::default()
+        };
+        assert_eq!(
+            crate::settings::audio_original_channel_fallback(&mp3, Some(&metadata)).as_deref(),
+            Some("立体声"),
+            "mp3 钳到同名后去重"
+        );
+    }
+
+    #[test]
+    fn mp3_original_channels_grey_out_for_multichannel_track() {
+        let config = ConversionConfig {
+            audio_codec: "mp3".to_string(),
+            selected_audio_tracks: vec![1],
+            ..ConversionConfig::default()
+        };
+        let metadata = multichannel_metadata();
+
+        let options = crate::settings::audio_channel_options(&config, Some(&metadata), false);
+        let original = options
+            .iter()
+            .find(|option| option.id == "original")
+            .expect("灰显而非隐藏");
+        assert!(original.is_disabled);
+        assert!(
+            options
+                .iter()
+                .any(|option| option.id == "stereo" && !option.is_disabled)
+        );
+    }
+
+    #[test]
+    fn normalize_snaps_legacy_values_via_codec_switch() {
+        let mut config = ConversionConfig {
+            audio_bitrate: "320".to_string(),
+            audio_sample_rate: "88200".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        assert!(crate::settings::apply_audio_codec(&mut config, "libopus"));
+        assert_eq!(config.audio_bitrate, "256", "320 应吸附到 Opus 表最近档");
+        assert_eq!(
+            config.audio_sample_rate, "48000",
+            "88200 应吸附到 Opus 采样率表最近档"
+        );
+    }
+}
+
 mod visible_settings_tabs {
     use super::*;
 
@@ -2143,7 +2435,6 @@ mod visible_settings_tabs {
                 "video-filters",
                 "audio",
                 "audio-filters",
-                "subtitles",
                 "metadata"
             ]
         );
@@ -2166,13 +2457,7 @@ mod visible_settings_tabs {
 
         assert_eq!(
             tabs,
-            vec![
-                "source",
-                "output",
-                "audio",
-                "audio-filters",
-                "metadata"
-            ]
+            vec!["source", "output", "audio", "audio-filters", "metadata"]
         );
     }
 
@@ -2204,6 +2489,18 @@ mod visible_settings_tabs {
     }
 
     #[test]
+    fn subtitles_tab_resolves_into_merged_audio_tab() {
+        assert_eq!(
+            resolve_active_settings_tab(
+                crate::settings::SettingsTab::Subtitles,
+                &ConversionConfig::default(),
+                None,
+            ),
+            crate::settings::SettingsTab::Audio
+        );
+    }
+
+    #[test]
     fn copy_mode_hides_video_tab_but_keeps_audio_and_subtitles_when_supported() {
         let config = ConversionConfig {
             processing_mode: ProcessingMode::Copy,
@@ -2211,16 +2508,7 @@ mod visible_settings_tabs {
         };
         let tabs = tab_ids(super::visible_settings_tabs(&config, None));
 
-        assert_eq!(
-            tabs,
-            vec![
-                "source",
-                "output",
-                "audio",
-                "subtitles",
-                "metadata"
-            ]
-        );
+        assert_eq!(tabs, vec!["source", "output", "audio", "metadata"]);
     }
 
     #[test]

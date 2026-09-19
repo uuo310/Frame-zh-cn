@@ -59,6 +59,7 @@ impl FrameRoot {
             self.settings_ui.bitrate_window_popover = PopoverState::Hidden;
         } else {
             self.close_video_selects_immediate();
+            self.close_audio_selects_immediate();
             self.close_preset_menu();
             self.settings_ui.bitrate_window_popover = PopoverState::Open;
         }

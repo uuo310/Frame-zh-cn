@@ -479,11 +479,21 @@ pub(in crate::app) fn frame_select_option_with_caption(
     id: impl Into<String>,
     label: impl Into<String>,
     caption: impl Into<String>,
+    label_text_size: f32,
     selected: bool,
     enabled: bool,
     palette: &'static theme::ThemePalette,
 ) -> gpui::Stateful<gpui::Div> {
-    frame_select_option_caption_inner(id, label, caption, selected, enabled, None, palette)
+    frame_select_option_caption_inner(
+        id,
+        label,
+        caption,
+        label_text_size,
+        selected,
+        enabled,
+        None,
+        palette,
+    )
 }
 
 #[expect(
@@ -494,6 +504,7 @@ pub(in crate::app) fn frame_select_option_with_caption_and_focus(
     id: impl Into<String>,
     label: impl Into<String>,
     caption: impl Into<String>,
+    label_text_size: f32,
     selected: bool,
     enabled: bool,
     focus: &FocusHandle,
@@ -503,6 +514,7 @@ pub(in crate::app) fn frame_select_option_with_caption_and_focus(
         id,
         label,
         caption,
+        label_text_size,
         selected,
         enabled,
         Some(focus),
@@ -510,10 +522,15 @@ pub(in crate::app) fn frame_select_option_with_caption_and_focus(
     )
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Captioned select options mirror the single-line builder plus a right-aligned caption and focus handle."
+)]
 fn frame_select_option_caption_inner(
     id: impl Into<String>,
     label: impl Into<String>,
     caption: impl Into<String>,
+    label_text_size: f32,
     selected: bool,
     enabled: bool,
     focus: Option<&FocusHandle>,
@@ -540,7 +557,7 @@ fn frame_select_option_caption_inner(
             10.0 + FRAME_SELECT_VALUE_INDENT - FRAME_SELECT_CONTENT_PADDING,
         ))
         .pr(theme::ui_rem(12.0))
-        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .text_size(theme::ui_rem(label_text_size))
         .font_weight(theme::TEXT_WEIGHT_MEDIUM)
         .text_color(color(palette.text_primary))
         .opacity(if enabled { 1.0 } else { 0.5 })

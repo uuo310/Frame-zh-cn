@@ -449,6 +449,7 @@ impl FrameRoot {
         };
         if self.settings_ui.preset_menu_popover.is_open() {
             self.close_video_selects_immediate();
+            self.close_audio_selects_immediate();
         } else {
             self.settings_ui.preset_menu_edit_mode = false;
             self.settings_ui.preset_menu_naming = false;
