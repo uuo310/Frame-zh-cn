@@ -3,6 +3,7 @@
 use std::{
     env,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 pub const BINARIES_RESOURCE_DIR: &str = "resources/binaries";
@@ -39,6 +40,21 @@ pub fn ffmpeg_executable() -> String {
 #[must_use]
 pub fn ffprobe_executable() -> String {
     resolve_tool_executable(FFPROBE_ENV_VAR, "ffprobe")
+}
+
+/// 外部工具（ffmpeg/ffprobe）命令构造：Windows 下带 CREATE_NO_WINDOW，
+/// GUI 程序拉起子进程时不再闪控制台窗口；输出捕获走管道，不受影响。
+#[must_use]
+pub fn tool_command(executable: &str) -> Command {
+    #[cfg_attr(not(windows), allow(unused_mut))]
+    let mut command = Command::new(executable);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
+    command
 }
 
 fn resolve_tool_executable(env_var: &str, tool_name: &str) -> String {

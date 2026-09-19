@@ -1,9 +1,6 @@
 //! Runtime encoder capability detection for the native app.
 
-use std::{
-    io,
-    process::{Command, Stdio},
-};
+use std::{io, process::Stdio};
 
 use frame_core::capabilities::{
     AvailableEncoders, AvailableFilters, ffmpeg_encoder_list_args, ffmpeg_filter_list_args,
@@ -11,7 +8,7 @@ use frame_core::capabilities::{
 };
 use frame_core::types::HwDecodeBackend;
 
-use crate::runtime_binaries::ffmpeg_executable;
+use crate::runtime_binaries::{ffmpeg_executable, tool_command};
 
 /// 把已探测到的编码能力折算成本机可用的显卡解码后端。
 ///
@@ -57,7 +54,7 @@ pub fn detect_available_encoders() -> Result<AvailableEncoders, CapabilityDetect
 pub fn detect_available_encoders_with_executable(
     executable: &str,
 ) -> Result<AvailableEncoders, CapabilityDetectionError> {
-    let output = Command::new(executable)
+    let output = tool_command(executable)
         .args(ffmpeg_encoder_list_args())
         .stdin(Stdio::null())
         .output()?;
@@ -85,7 +82,7 @@ pub fn detect_available_filters() -> Result<AvailableFilters, CapabilityDetectio
 pub fn detect_available_filters_with_executable(
     executable: &str,
 ) -> Result<AvailableFilters, CapabilityDetectionError> {
-    let output = Command::new(executable)
+    let output = tool_command(executable)
         .args(ffmpeg_filter_list_args())
         .stdin(Stdio::null())
         .output()?;

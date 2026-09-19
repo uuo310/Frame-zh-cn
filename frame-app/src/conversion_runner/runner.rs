@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io::Read,
-    process::{Command, Stdio},
+    process::Stdio,
     sync::mpsc::{self, RecvTimeoutError},
     thread,
     time::Duration,
@@ -16,7 +16,7 @@ use frame_core::{
     utils::{DURATION_REGEX, TIME_REGEX, parse_time},
 };
 
-use crate::runtime_binaries::{ffmpeg_executable, ffprobe_executable};
+use crate::runtime_binaries::{ffmpeg_executable, ffprobe_executable, tool_command};
 
 use super::{controller::ConversionProcessController, output_paths::disambiguate_output_paths};
 
@@ -160,7 +160,7 @@ fn run_prepared_conversion_task_with_control(
         }
     }
 
-    let mut child = Command::new(&executable)
+    let mut child = tool_command(&executable)
         .args(&args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -246,7 +246,7 @@ fn run_stats_pass(
     controller: &ConversionProcessController,
     emit: &mut impl FnMut(ConversionEvent),
 ) -> Result<bool, ConversionError> {
-    let mut child = Command::new(executable)
+    let mut child = tool_command(executable)
         .args(args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -328,7 +328,7 @@ fn emit_cancelled_task(id: &str, emit: &mut impl FnMut(ConversionEvent)) {
 }
 
 fn probe_media_file(file_path: &str) -> Result<ProbeMetadata, ConversionError> {
-    let output = Command::new(ffprobe_executable())
+    let output = tool_command(&ffprobe_executable())
         .args(ffprobe_json_args(file_path))
         .output()
         .map_err(ConversionError::Io)?;

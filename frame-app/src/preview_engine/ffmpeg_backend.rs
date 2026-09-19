@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     io::{BufRead, BufReader, ErrorKind, Read},
-    process::{Child, Command, Stdio},
+    process::{Child, Stdio},
     sync::{
         Arc, Mutex, MutexGuard,
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -23,7 +23,7 @@ use gpui::{ImageId, RenderImage};
 
 use crate::{
     numeric::{f64_to_u64, u64_to_f64},
-    runtime_binaries::ffmpeg_executable,
+    runtime_binaries::{ffmpeg_executable, tool_command},
 };
 
 use super::metrics::{PreviewRuntimeMetricsStore, log_preview_runtime_metrics};
@@ -861,7 +861,7 @@ impl RunningPreviewProcess {
         let plan = preview_plan(config, seconds, true, precise)?;
         self.metrics.record_video_process_spawn();
         let spawned_at = Instant::now();
-        let mut child = Command::new(&self.executable)
+        let mut child = tool_command(&self.executable)
             .args(&plan.args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -967,7 +967,7 @@ impl RunningPreviewProcess {
         let output_spec = AudioOutputSpec::default_output()?;
         let plan = preview_audio_plan(config, seconds, true, precise, output_spec)?;
         self.metrics.record_audio_process_spawn();
-        let mut child = Command::new(&self.executable)
+        let mut child = tool_command(&self.executable)
             .args(&plan.args)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -1230,7 +1230,7 @@ fn decode_single_preview_frame(
     let mut args = plan.args.clone();
     insert_frame_limit(&mut args, 1);
     let read_started = Instant::now();
-    let output = Command::new(executable)
+    let output = tool_command(executable)
         .args(&args)
         .stdin(Stdio::null())
         .output()

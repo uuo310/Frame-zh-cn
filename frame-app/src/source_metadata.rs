@@ -1,6 +1,6 @@
 //! Source metadata state and ffprobe integration for the GPUI app.
 
-use std::{collections::HashMap, process::Command};
+use std::collections::HashMap;
 
 use frame_core::{
     error::ConversionError,
@@ -10,7 +10,7 @@ use frame_core::{
 
 use crate::{
     file_queue::FileQueue,
-    runtime_binaries::ffprobe_executable,
+    runtime_binaries::{ffprobe_executable, tool_command},
     settings::{AudioTrack, SourceKind, SourceMetadata, SourceTags, SubtitleTrack},
 };
 
@@ -161,7 +161,7 @@ pub fn probe_source_metadata_with_executable(
     file_path: &str,
     executable: &str,
 ) -> Result<SourceMetadata, ConversionError> {
-    let output = Command::new(executable)
+    let output = tool_command(executable)
         .args(ffprobe_json_args(file_path))
         .output()
         .map_err(ConversionError::Io)?;

@@ -4,7 +4,7 @@
 //! view for a file) and caches the result per file id, mirroring
 //! [`crate::source_metadata`] exactly in lifecycle and async shape.
 
-use std::{collections::HashMap, process::Command, sync::Arc};
+use std::{collections::HashMap, sync::Arc};
 
 use frame_core::bitrate_analysis::{
     BitrateWindowStats, StreamCpb, cpb_trace_args, cpb_trace_supported, packet_probe_args,
@@ -12,7 +12,7 @@ use frame_core::bitrate_analysis::{
 };
 use frame_core::error::ConversionError;
 
-use crate::runtime_binaries::{ffmpeg_executable, ffprobe_executable};
+use crate::runtime_binaries::{ffmpeg_executable, ffprobe_executable, tool_command};
 
 /// Time-window widths offered in the UI, in seconds.
 pub const BITRATE_ANALYSIS_WINDOWS: [f64; 3] = [0.1, 0.5, 1.0];
@@ -130,7 +130,7 @@ pub fn run_bitrate_analysis(
     video_codec: &str,
 ) -> Result<BitrateAnalysisData, ConversionError> {
     let executable = ffprobe_executable();
-    let output = Command::new(&executable)
+    let output = tool_command(&executable)
         .args(packet_probe_args(file_path, video_stream_index))
         .output()
         .map_err(ConversionError::Io)?;
@@ -174,7 +174,7 @@ fn probe_stream_cpb(file_path: &str, video_codec: &str) -> StreamCpb {
         return StreamCpb::Unknown;
     }
     let executable = ffmpeg_executable();
-    Command::new(&executable)
+    tool_command(&executable)
         .args(cpb_trace_args(file_path))
         .output()
         .map_or(StreamCpb::Unknown, |output| {
