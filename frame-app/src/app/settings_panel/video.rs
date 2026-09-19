@@ -567,7 +567,7 @@ fn settings_video_gif_loop_section(
         .child(settings_hint_text("设为 0 表示无限循环", palette))
 }
 
-/// 整宽码率字段的标签列宽（设计像素）：输入框左缘由它锁定，标签在其中缩进不推移它。
+/// 整宽码率字段的标签列宽（设计像素）：输入框左缘由它锁定，标签贴列首不推移它。
 const VIDEO_RATE_LABEL_COLUMN_WIDTH: f32 = 104.0;
 
 /// 列底说明的缩进身位（设计像素，约一个中文字符）：两条说明都退这一档求对称，
