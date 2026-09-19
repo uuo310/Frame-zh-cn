@@ -5,12 +5,12 @@ use super::{
     SETTINGS_TAB_BUTTON_SIZE, SETTINGS_TAB_ICON_SIZE, SettingsRenderState,
     SettingsSubtitlesTabState, SettingsTab, SettingsVideoInputFocuses, SourceKind,
     StatefulInteractiveElement, Styled, Window, apply_button_motion, button_colors,
-    button_highlight_shadows, button_motion, color, div, frame_tooltip, icon_svg, mix_color,
-    panel_bottom_separator, resolve_active_settings_tab, settings_audio_filters_tab,
-    settings_audio_tab, settings_images_tab, settings_metadata_tab, settings_output_tab,
-    settings_section_label, settings_source_tab, settings_subtitles_tab, settings_tab_icon,
-    settings_video_filters_tab, settings_video_tab, subtitles_tab_supported, theme,
-    visible_settings_tabs,
+    button_highlight_shadows, button_motion, color, div, frame_tooltip,
+    horizontal_separator_shadows, icon_svg, mix_color, panel_bottom_separator,
+    resolve_active_settings_tab, settings_audio_filters_tab, settings_audio_tab,
+    settings_images_tab, settings_metadata_tab, settings_output_tab, settings_section_label,
+    settings_source_tab, settings_subtitles_tab, settings_tab_icon, settings_video_filters_tab,
+    settings_video_tab, subtitles_tab_supported, theme, visible_settings_tabs,
 };
 use crate::settings::source_kind_for;
 
@@ -107,7 +107,7 @@ pub(in crate::app) fn settings_panel(
 const fn rail_cluster_middle(tab: &SettingsTab) -> bool {
     matches!(
         tab,
-        SettingsTab::Video | SettingsTab::Images | SettingsTab::Audio | SettingsTab::Subtitles
+        SettingsTab::Video | SettingsTab::Images | SettingsTab::Audio
     )
 }
 
@@ -345,9 +345,8 @@ pub(in crate::app) fn settings_tab_content(
             window,
             cx,
         )),
-        SettingsTab::Audio | SettingsTab::Subtitles => content.child(
-            // 软合并：音频区（上）+ 字幕区（下）同页滚动；Subtitles 变体保留但 rail 不再单列，
-            // 持久化的 Subtitles 活动页由 resolve_active_settings_tab 映射到 Audio。
+        SettingsTab::Audio => content.child(
+            // 合并页：音频区（上）+ 字幕区（下）同页滚动，字幕区按 subtitles_tab_supported 门控。
             settings_audio_subtitles_content(settings, window, cx),
         ),
         SettingsTab::AudioFilters => content.child(settings_audio_filters_tab(
@@ -370,7 +369,7 @@ pub(in crate::app) fn settings_tab_content(
     }
 }
 
-/// 合并页内容：音频区（四行下拉 + 条件行 + 源轨道触发器）在上，
+/// 合并页内容：音频区（四行下拉 + 条件行 + 音频轨道触发器）在上，
 /// 字幕区（模式分支 + 风格浮层）在源/容器支持时追加在下，同页滚动。
 fn settings_audio_subtitles_content(
     settings: &SettingsRenderState<'_>,
@@ -378,7 +377,7 @@ fn settings_audio_subtitles_content(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let palette = settings.palette;
-    let content = div().child(settings_audio_tab(
+    let content = div().flex().flex_col().gap_4().child(settings_audio_tab(
         settings.config,
         settings.metadata,
         settings.settings_disabled,
@@ -394,35 +393,83 @@ fn settings_audio_subtitles_content(
         cx,
     ));
     if subtitles_tab_supported(settings.config, settings.metadata) {
-        content.child(settings_subtitles_tab(
-            SettingsSubtitlesTabState {
-                config: settings.config,
-                metadata: settings.metadata,
-                settings_disabled: settings.settings_disabled,
-                available_encoders: settings.available_encoders,
-                subtitle_fonts: settings.subtitle_fonts,
-                focuses: settings.subtitle_focuses,
-                external_language_focus: settings.external_subtitle_language_focus,
-                external_title_focus: settings.external_subtitle_title_focus,
-                external_track_index: settings.external_subtitle_track_index,
-                mode: settings.subtitle_mode,
-                color_focuses: settings.subtitle_color_focuses,
-                active_popover: settings.subtitle_popover,
-                rendered_popover: settings.subtitle_rendered_popover,
-                font_select_scroll_handle: settings.subtitle_font_select_scroll_handle,
-                font_size_select_scroll_handle: settings.subtitle_font_size_select_scroll_handle,
-                font_color_draft: settings.subtitle_font_color_draft,
-                outline_color_draft: settings.subtitle_outline_color_draft,
-                font_color_hsv_draft: settings.subtitle_font_color_hsv_draft,
-                outline_color_hsv_draft: settings.subtitle_outline_color_hsv_draft,
-                palette,
-            },
-            window,
-            cx,
-        ))
+        content
+            .child(
+                // 两区之间的切口：8px 沟（canvas 与窗口底同色，视觉等同真缝）。贯穿靠
+                // flex 拉伸 + 左右负边距顶到卡缘——不能用 w_full（定宽会让右端短一截）。
+                // 沟上下总距 13px（用户改定）：行距 gap_4=16，mt/mb −3 抵掉 3px 即得。
+                div()
+                    .h(gpui::px(8.0))
+                    .mt(theme::ui_rem(-3.0))
+                    .mb(theme::ui_rem(-3.0))
+                    .ml(theme::ui_rem(-SETTINGS_PANEL_PADDING))
+                    .mr(theme::ui_rem(-SETTINGS_PANEL_PADDING))
+                    .bg(color(palette.canvas))
+                    .shadow(horizontal_separator_shadows(palette)),
+            )
+            .child(settings_zone_title("字幕", palette))
+            .child(settings_subtitles_tab(
+                SettingsSubtitlesTabState {
+                    config: settings.config,
+                    metadata: settings.metadata,
+                    settings_disabled: settings.settings_disabled,
+                    available_encoders: settings.available_encoders,
+                    subtitle_fonts: settings.subtitle_fonts,
+                    focuses: settings.subtitle_focuses,
+                    external_language_focus: settings.external_subtitle_language_focus,
+                    external_title_focus: settings.external_subtitle_title_focus,
+                    external_track_index: settings.external_subtitle_track_index,
+                    mode: settings.subtitle_mode,
+                    color_focuses: settings.subtitle_color_focuses,
+                    active_popover: settings.subtitle_popover,
+                    rendered_popover: settings.subtitle_rendered_popover,
+                    font_select_scroll_handle: settings.subtitle_font_select_scroll_handle,
+                    font_size_select_scroll_handle: settings
+                        .subtitle_font_size_select_scroll_handle,
+                    font_color_draft: settings.subtitle_font_color_draft,
+                    outline_color_draft: settings.subtitle_outline_color_draft,
+                    font_color_hsv_draft: settings.subtitle_font_color_hsv_draft,
+                    outline_color_hsv_draft: settings.subtitle_outline_color_hsv_draft,
+                    palette,
+                },
+                window,
+                cx,
+            ))
     } else {
         content
     }
+}
+
+/// 区头：全亮标题、无线。整页唯一的通宽线是两区之间的切口（settings_audio_subtitles_content），
+/// 线不挂在任何标题下，保住「一刀」的边界语义；与二级节头 settings_section（0.80 暗）分层。
+pub(in crate::app) fn settings_zone_title(
+    label: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(color(palette.text_primary))
+        .child(theme::ui_text(label))
+}
+
+/// 二级节头亮度：与视频页二级标题（0.80）同档，无线——线是区级切口（全页唯一）的专属层级语言。
+const SECONDARY_SECTION_TITLE_ALPHA: f32 = 0.80;
+
+/// 合并页二级节头：暗色标题、无线——线留给各页节头与合并页的切口沟，保住「两块」的分隔感。
+pub(in crate::app) fn settings_section_secondary(
+    label: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    let mut text_color = color(palette.text_primary);
+    text_color.a *= SECONDARY_SECTION_TITLE_ALPHA;
+    div().flex().flex_col().gap_3().child(
+        div()
+            .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+            .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+            .text_color(text_color)
+            .child(theme::ui_text(label)),
+    )
 }
 
 pub(in crate::app) fn settings_section(

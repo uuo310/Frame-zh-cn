@@ -567,11 +567,6 @@ fn settings_video_gif_loop_section(
         .child(settings_hint_text("设为 0 表示无限循环", palette))
 }
 
-/// 次级标题的左线缩进（设计像素）：节标题贴左缘，组次标题与字段标签统一收到这条线上。
-/// 只有标题缩进——输入框、触发器、档框的位置一律不动。取值＝复选框文字起点
-/// （指示器 16 + 间距 8 = 24）再左移一个汉字宽，避免整宽标签贴着输入框折行。
-const VIDEO_SUBTITLE_INDENT: f32 = 11.0;
-
 /// 整宽码率字段的标签列宽（设计像素）：输入框左缘由它锁定，标签在其中缩进不推移它。
 const VIDEO_RATE_LABEL_COLUMN_WIDTH: f32 = 104.0;
 
@@ -727,7 +722,6 @@ fn settings_video_quality_section(
                         div()
                             .flex_none()
                             .whitespace_nowrap()
-                            .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
                             .w(theme::ui_rem(VIDEO_RATE_LABEL_COLUMN_WIDTH))
                             .child(settings_video_field_label_secondary(
                                 "平均码率 (kbps)",
@@ -782,9 +776,10 @@ fn settings_video_quality_section(
                             .flex()
                             .flex_col()
                             .gap_2()
-                            .child(div().pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT)).child(
-                                settings_video_field_label_tertiary("最大码率 (kbps)", palette),
-                            ))
+                            .child(div().child(settings_video_field_label_tertiary(
+                                "最大码率 (kbps)",
+                                palette,
+                            )))
                             .child(frame_text_input(
                                 FrameTextInputSpec {
                                     id: "settings-video-maxrate-field",
@@ -804,9 +799,10 @@ fn settings_video_quality_section(
                             .flex()
                             .flex_col()
                             .gap_2()
-                            .child(div().pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT)).child(
-                                settings_video_field_label_tertiary("VBV 缓冲 (kbit)", palette),
-                            ))
+                            .child(div().child(settings_video_field_label_tertiary(
+                                "VBV 缓冲 (kbit)",
+                                palette,
+                            )))
                             .child(frame_text_input(
                                 FrameTextInputSpec {
                                     id: "settings-video-bufsize-field",
@@ -849,7 +845,6 @@ fn settings_video_group_label(
         .flex()
         .items_center()
         .gap_2()
-        .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
         .child(settings_video_field_label_secondary(label, palette))
         .child(settings_hint_text(remark, palette))
 }
@@ -867,11 +862,7 @@ fn settings_video_psy_column(
         .flex()
         .flex_col()
         .gap_2()
-        .child(
-            div()
-                .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
-                .child(settings_video_field_label_tertiary(label, palette)),
-        )
+        .child(div().child(settings_video_field_label_tertiary(label, palette)))
         .child(frame_text_input(spec, palette, window, cx))
 }
 
@@ -1239,11 +1230,7 @@ fn settings_video_range_field(
                 .flex()
                 .items_end()
                 .justify_between()
-                .child(
-                    div()
-                        .pl(theme::ui_rem(VIDEO_SUBTITLE_INDENT))
-                        .child(settings_video_field_label_secondary(label, palette)),
-                )
+                .child(div().child(settings_video_field_label_secondary(label, palette)))
                 .child(settings_value_badge(value_label, palette)),
         )
         .child(settings_video_range_slider(

@@ -177,7 +177,7 @@ pub(in crate::app) fn settings_subtitles_tab(
 ) -> gpui::Div {
     let palette = state.palette;
     let content = div().flex().flex_col().gap_4().child(
-        settings_section("字幕类型", palette)
+        settings_section_secondary("字幕类型", palette)
             .child(settings_subtitle_mode_grid(state.mode, palette, window, cx)),
     );
 
@@ -257,7 +257,7 @@ fn settings_selectable_subtitles_content(
     );
     if track_options.is_empty() {
         return content.child(
-            settings_section("源轨道", palette)
+            settings_section_secondary("字幕轨道", palette)
                 .child(settings_hint_text("无字幕", palette)),
         );
     }
@@ -267,7 +267,7 @@ fn settings_selectable_subtitles_content(
         list = list.child(settings_subtitle_track_button(option, palette, window, cx));
     }
 
-    content.child(settings_section("源轨道", palette).child(list))
+    content.child(settings_section_secondary("字幕轨道", palette).child(list))
 }
 
 fn settings_burn_in_subtitles_content(
@@ -279,7 +279,7 @@ fn settings_burn_in_subtitles_content(
     let palette = state.palette;
     let copy_mode = config.processing_mode == ProcessingMode::Copy;
     let burn_in_disabled = state.settings_disabled || copy_mode;
-    let mut burn_in_section = settings_section("烧录文件", palette)
+    let mut burn_in_section = settings_section_secondary("烧录文件", palette)
         .child(settings_subtitle_load_button(
             burn_in_disabled,
             state.focuses.burn_file,
@@ -312,8 +312,8 @@ fn settings_burn_in_subtitles_content(
         return content;
     }
 
-    content.child(
-        settings_section("风格", palette).child(settings_subtitle_style_controls(
+    content.child(settings_section_secondary("风格", palette).child(
+        settings_subtitle_style_controls(
             SettingsSubtitleStyleState {
                 config,
                 disabled: burn_in_disabled,
@@ -332,8 +332,8 @@ fn settings_burn_in_subtitles_content(
             },
             window,
             cx,
-        )),
-    )
+        ),
+    ))
 }
 
 fn settings_external_subtitles_section(
@@ -346,7 +346,7 @@ fn settings_external_subtitles_section(
     let needs_unavailable_dvbsub =
         config.container.eq_ignore_ascii_case("m2t") && !state.available_encoders.dvbsub;
     let enabled = !state.settings_disabled && !needs_unavailable_dvbsub;
-    let mut section = settings_section("外部文件", palette)
+    let mut section = settings_section_secondary("外部文件", palette)
         .child(settings_external_subtitle_add_button(
             enabled,
             state.focuses.add_external_files,

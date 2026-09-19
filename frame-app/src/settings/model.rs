@@ -60,7 +60,6 @@ pub enum SettingsTab {
     Images,
     Audio,
     AudioFilters,
-    Subtitles,
     Metadata,
 }
 
@@ -75,7 +74,6 @@ impl SettingsTab {
             Self::Images => "图像",
             Self::Audio => "音频",
             Self::AudioFilters => "音频滤镜",
-            Self::Subtitles => "字幕",
             Self::Metadata => "元数据",
         }
     }
@@ -90,13 +88,12 @@ impl SettingsTab {
             Self::Images => "images",
             Self::Audio => "audio",
             Self::AudioFilters => "audio-filters",
-            Self::Subtitles => "subtitles",
             Self::Metadata => "metadata",
         }
     }
 }
 
-pub const ALL_SETTINGS_TABS: [SettingsTab; 9] = [
+pub const ALL_SETTINGS_TABS: [SettingsTab; 8] = [
     SettingsTab::Source,
     SettingsTab::Output,
     SettingsTab::Video,
@@ -104,7 +101,6 @@ pub const ALL_SETTINGS_TABS: [SettingsTab; 9] = [
     SettingsTab::Images,
     SettingsTab::Audio,
     SettingsTab::AudioFilters,
-    SettingsTab::Subtitles,
     SettingsTab::Metadata,
 ];
 

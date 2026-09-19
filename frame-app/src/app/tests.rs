@@ -3917,12 +3917,12 @@ mod visual_fixtures {
     }
 
     #[test]
-    fn settings_subtitles_fixture_opens_subtitles_tab_with_tracks() {
+    fn settings_subtitles_fixture_opens_merged_audio_tab_with_tracks() {
         let mut root = FrameRoot::new();
 
         root.apply_visual_fixture(Some(VisualFixture::SettingsSubtitles));
 
-        assert_eq!(root.settings_ui.active_tab, SettingsTab::Subtitles);
+        assert_eq!(root.settings_ui.active_tab, SettingsTab::Audio);
         assert_eq!(
             root.selected_source_metadata()
                 .map(|metadata| metadata.subtitle_tracks.len()),
@@ -3936,7 +3936,7 @@ mod visual_fixtures {
 
         root.apply_visual_fixture(Some(VisualFixture::SettingsSubtitlesPopover));
 
-        assert_eq!(root.settings_ui.active_tab, SettingsTab::Subtitles);
+        assert_eq!(root.settings_ui.active_tab, SettingsTab::Audio);
         assert_eq!(
             root.subtitle_ui.popover,
             Some(SettingsSubtitlePopover::FontColor)

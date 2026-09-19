@@ -2489,18 +2489,6 @@ mod visible_settings_tabs {
     }
 
     #[test]
-    fn subtitles_tab_resolves_into_merged_audio_tab() {
-        assert_eq!(
-            resolve_active_settings_tab(
-                crate::settings::SettingsTab::Subtitles,
-                &ConversionConfig::default(),
-                None,
-            ),
-            crate::settings::SettingsTab::Audio
-        );
-    }
-
-    #[test]
     fn copy_mode_hides_video_tab_but_keeps_audio_and_subtitles_when_supported() {
         let config = ConversionConfig {
             processing_mode: ProcessingMode::Copy,

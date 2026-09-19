@@ -212,7 +212,7 @@ pub(in crate::app) fn settings_audio_tab(
         content = content.child(settings_hint_text("流复制模式保留源音频设置。", palette));
     } else if original_channels_downmix_to_stereo(config, metadata) {
         content = content.child(settings_hint_text(
-            "MP3/MP2 最多支持两个声道；多声道源轨道将导出为立体声。",
+            "MP3/MP2 最多支持两个声道；多声道音频轨道将导出为立体声。",
             palette,
         ));
     }
@@ -254,7 +254,7 @@ fn audio_labeled_row(
             div()
                 .relative()
                 .flex_none()
-                .w(relative(0.75))
+                .w(relative(AUDIO_SELECT_TRIGGER_WIDTH_RATIO))
                 .child(control),
         )
 }
@@ -272,7 +272,7 @@ fn bitrate_label(current: &str, options: &[AudioSelectOption]) -> String {
     )
 }
 
-/// 「源轨道」多选触发器：收起一行显示「已选 N/M」，展开为现有勾选轨道列表的浮层。
+/// 「音频轨道」多选触发器：收起一行显示「已选 N/M」，展开为现有勾选轨道列表的浮层。
 #[expect(
     clippy::too_many_arguments,
     reason = "The tracks row mirrors the select rows' explicit render context."
@@ -307,7 +307,7 @@ fn settings_audio_tracks_row(
 
     let trigger = frame_select_trigger_content(
         "audio-tracks-select",
-        "源轨道",
+        "音频轨道",
         div()
             .flex_1()
             .min_w_0()
@@ -353,15 +353,21 @@ fn settings_audio_tracks_row(
     let mut right = div()
         .relative()
         .flex_none()
-        .w(relative(0.75))
+        .w(relative(AUDIO_SELECT_TRIGGER_WIDTH_RATIO))
         .child(trigger);
 
     if tracks_popover != PopoverState::Hidden && track_count > 0 {
         let progress =
             audio_tracks_popover_progress(tracks_popover == PopoverState::Open, window, cx);
-        let ideal_height = (frame_select_content_height(track_count) + 8.0).min(328.0);
+        // 轨道行高与 select 选项行不同，不做逐行记账：列表直接用四行下拉同源帽值封顶，
+        // max_h 自动「少则包住内容、多则内部滚动」，行高差异不会裁行。
+        // 行间隔 4px（用户改定）：比字幕页同组件列表的 gap_2 更紧凑，仅此浮层生效。
+        // 列表须显式 grid（GPUI 默认 Block 布局会忽略 gap，字幕页同款配方）。
         let mut list = frame_select_options_list("audio-tracks-select-options-list", tracks_scroll)
-            .max_h(theme::ui_rem(ideal_height - 8.0));
+            .grid()
+            .grid_cols(1)
+            .gap_1()
+            .max_h(theme::ui_rem(AUDIO_SELECT_POPOVER_MAX_HEIGHT));
         for option in track_options {
             list = list.child(settings_audio_track_button(option, palette, window, cx));
         }
@@ -373,7 +379,9 @@ fn settings_audio_tracks_row(
             list,
             palette,
         )
-        .max_h(theme::ui_rem(ideal_height))
+        .max_h(theme::ui_rem(
+            AUDIO_SELECT_POPOVER_MAX_HEIGHT + AUDIO_SELECT_POPOVER_TOP_BUFFER,
+        ))
         .on_key_down(
             cx.listener(move |root, event: &gpui::KeyDownEvent, _window, cx| {
                 if event.keystroke.key.as_str() == "escape" {
@@ -403,7 +411,7 @@ fn settings_audio_tracks_row(
                 .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
                 .font_weight(theme::TEXT_WEIGHT_MEDIUM)
                 .text_color(color(palette.text_primary))
-                .child(theme::ui_text("源轨道")),
+                .child(theme::ui_text("音频轨道")),
         )
         .child(right)
 }
@@ -669,7 +677,7 @@ pub(in crate::app) fn settings_audio_track_button(
             primary: option.codec,
             detail: option.detail,
             trailing: option.bitrate,
-            layout: FrameTrackListItemLayout::Detailed,
+            layout: FrameTrackListItemLayout::Compact,
         },
         option.is_selected,
         is_enabled,

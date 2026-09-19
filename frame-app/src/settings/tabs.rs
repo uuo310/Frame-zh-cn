@@ -45,8 +45,6 @@ pub fn visible_settings_tabs(
             SettingsTab::Images => supports_images_tab,
             SettingsTab::Audio => supports_audio,
             SettingsTab::AudioFilters => supports_audio_filters_tab,
-            // 软合并：字幕页并入音频页（音频区上、字幕区下），rail 不再单列入口。
-            SettingsTab::Subtitles => false,
             SettingsTab::Source
             | SettingsTab::Output
             | SettingsTab::Metadata => true,
@@ -60,12 +58,6 @@ pub fn resolve_active_settings_tab(
     config: &ConversionConfig,
     metadata: Option<&SourceMetadata>,
 ) -> SettingsTab {
-    // 软合并：持久化的 Subtitles 活动页映射到合并页宿主 Audio。
-    let active_tab = if active_tab == SettingsTab::Subtitles {
-        SettingsTab::Audio
-    } else {
-        active_tab
-    };
     if visible_settings_tabs(config, metadata).contains(&active_tab) {
         active_tab
     } else {

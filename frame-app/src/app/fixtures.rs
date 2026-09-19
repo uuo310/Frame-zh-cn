@@ -317,7 +317,7 @@ impl FrameRoot {
     }
     pub(super) fn apply_settings_subtitles_fixture(&mut self) {
         self.apply_preview_ready_fixture();
-        self.settings_ui.active_tab = SettingsTab::Subtitles;
+        self.settings_ui.active_tab = SettingsTab::Audio;
         self.subtitle_font_families = vec![
             "Arial".to_string(),
             "Helvetica Neue".to_string(),

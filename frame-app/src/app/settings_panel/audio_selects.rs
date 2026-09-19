@@ -27,8 +27,8 @@ pub(in crate::app) const AUDIO_SELECT_TRIGGER_WIDTH_RATIO: f32 = 0.75;
 pub(in crate::app) const AUDIO_SELECT_LABEL_COLUMN_WIDTH: f32 = 64.0;
 const AUDIO_SELECT_POPOVER_GAP: f32 = 4.0;
 const AUDIO_SELECT_POPOVER_TOP_OFFSET: f32 = SETTINGS_CONTROL_HEIGHT + AUDIO_SELECT_POPOVER_GAP;
-const AUDIO_SELECT_POPOVER_TOP_BUFFER: f32 = 8.0;
-const AUDIO_SELECT_POPOVER_MAX_HEIGHT: f32 = 320.0;
+pub(in crate::app) const AUDIO_SELECT_POPOVER_TOP_BUFFER: f32 = 8.0;
+pub(in crate::app) const AUDIO_SELECT_POPOVER_MAX_HEIGHT: f32 = 320.0;
 const AUDIO_SELECT_POPOVER_MIN_HEIGHT: f32 = 96.0;
 
 /// 音频页表单行下拉，替换旧的编码平铺列表 / 码率输入框 / 声道按钮排。
@@ -105,7 +105,7 @@ impl AudioSelectId {
 
     pub(in crate::app) const fn label(self) -> &'static str {
         match self {
-            Self::Codec => "编码",
+            Self::Codec => "音频编码",
             Self::Bitrate => "码率",
             Self::SampleRate => "采样率",
             Self::Channels => "声道",

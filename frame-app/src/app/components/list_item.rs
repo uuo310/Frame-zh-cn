@@ -109,7 +109,6 @@ pub(in crate::app) struct FrameTrackListItemText {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::app) enum FrameTrackListItemLayout {
     Compact,
-    Detailed,
 }
 
 pub(in crate::app) fn frame_track_list_item(
@@ -223,33 +222,6 @@ fn frame_track_list_item_label(
             .gap_2()
             .child(index)
             .child(primary_label)
-            .when(!detail.is_empty(), |this| {
-                this.child(
-                    div()
-                        .min_w_0()
-                        .flex_1()
-                        .truncate()
-                        .font_weight(theme::TEXT_WEIGHT_REGULAR)
-                        .text_color(color(palette.text_muted))
-                        .child(format!("• {detail}")),
-                )
-            }),
-        FrameTrackListItemLayout::Detailed => div()
-            .min_w_0()
-            .flex_1()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .child(
-                div()
-                    .min_w_0()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap_2()
-                    .child(index)
-                    .child(primary_label),
-            )
             .when(!detail.is_empty() || !trailing.is_empty(), |this| {
                 let metadata = match (detail.is_empty(), trailing.is_empty()) {
                     (false, false) => format!("{detail} • {trailing}"),
@@ -260,12 +232,11 @@ fn frame_track_list_item_label(
                 this.child(
                     div()
                         .min_w_0()
-                        .w_full()
+                        .flex_1()
                         .truncate()
-                        .font_features(crate::assets::frame_tabular_number_font_features())
                         .font_weight(theme::TEXT_WEIGHT_REGULAR)
                         .text_color(color(palette.text_muted))
-                        .child(metadata),
+                        .child(format!("• {metadata}")),
                 )
             }),
     };

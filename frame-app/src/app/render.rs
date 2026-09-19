@@ -463,12 +463,13 @@ impl Render for FrameRoot {
                     self.ensure_text_input_focus(FrameTextInputKind::SubtitleOutlineColorHex, cx);
                 let subtitles_copy_mode =
                     selected_config_snapshot.processing_mode == ProcessingMode::Copy;
-                let subtitles_tab_active = self.settings_ui.active_tab == SettingsTab::Subtitles;
-                let subtitles_enabled = subtitles_tab_active
+                let subtitles_area_active = self.settings_ui.active_tab == SettingsTab::Audio
+                    && subtitles_tab_supported(&selected_config_snapshot, source_metadata.as_ref());
+                let subtitles_enabled = subtitles_area_active
                     && !self.file_queue.selected_file_locked()
                     && !subtitles_copy_mode;
                 let external_subtitles_enabled =
-                    subtitles_tab_active && !self.file_queue.selected_file_locked();
+                    subtitles_area_active && !self.file_queue.selected_file_locked();
                 let subtitle_font_option_count = subtitle_font_options(
                     &selected_config_snapshot,
                     &self.subtitle_font_families,

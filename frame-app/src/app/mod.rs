@@ -372,7 +372,7 @@ struct SettingsUiState {
     audio_sample_rate_select_scroll: ScrollHandle,
     audio_channels_select_popover: PopoverState,
     audio_channels_select_scroll: ScrollHandle,
-    /// 「源轨道」多选触发器的浮层状态（展开的勾选列表）。
+    /// 「音频轨道」多选触发器的浮层状态（展开的勾选列表）。
     audio_tracks_popover: PopoverState,
     audio_tracks_select_scroll: ScrollHandle,
     /// Popover placement anchor (window-space mouse y at last hover), one slot
