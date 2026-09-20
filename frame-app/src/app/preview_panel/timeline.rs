@@ -330,9 +330,18 @@ pub(in crate::app) fn preview_timeline_track(
         })
         .on_drag_move(cx.listener(
             |root, event: &DragMoveEvent<PreviewTimelineDrag>, _window, cx| {
+                if root.preview_timeline_drag_aborted() {
+                    return;
+                }
                 let drag = *event.drag(cx);
-                let percent =
-                    timeline_slider_percent_from_bounds(event.event.position, event.bounds);
+                let Some(percent) =
+                    preview_timeline_drag_percent_from_bounds(event.event.position, event.bounds)
+                else {
+                    if root.abort_preview_timeline_drag_with_context(cx) {
+                        cx.notify();
+                    }
+                    return;
+                };
                 if root.apply_preview_timeline_drag_with_context(drag.target, percent, cx) {
                     cx.notify();
                 }
@@ -579,6 +588,38 @@ pub(in crate::app) fn timeline_slider_percent_from_bounds(
 
     let x = (position.x - bounds.origin.x).as_f32();
     f64::from((x / width).clamp(0.0, 1.0))
+}
+
+pub(in crate::app) const PREVIEW_TIMELINE_DRAG_TOP_OVERFLOW: f32 = 34.0;
+pub(in crate::app) const PREVIEW_TIMELINE_DRAG_BOTTOM_OVERFLOW: f32 = 16.0;
+pub(in crate::app) const PREVIEW_TIMELINE_DRAG_HORIZONTAL_OVERFLOW: f32 = 8.0;
+
+pub(in crate::app) fn preview_timeline_drag_percent_from_bounds(
+    position: gpui::Point<Pixels>,
+    bounds: Bounds<Pixels>,
+) -> Option<f64> {
+    let width = bounds.size.width.as_f32();
+    let height = bounds.size.height.as_f32();
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+
+    let min_y = bounds.origin.y.as_f32() - PREVIEW_TIMELINE_DRAG_TOP_OVERFLOW;
+    let max_y = bounds.origin.y.as_f32() + height + PREVIEW_TIMELINE_DRAG_BOTTOM_OVERFLOW;
+    let pos_y = position.y.as_f32();
+    if pos_y < min_y || pos_y > max_y {
+        return None;
+    }
+
+    let min_x = bounds.origin.x.as_f32() - PREVIEW_TIMELINE_DRAG_HORIZONTAL_OVERFLOW;
+    let max_x = bounds.origin.x.as_f32() + width + PREVIEW_TIMELINE_DRAG_HORIZONTAL_OVERFLOW;
+    let pos_x = position.x.as_f32();
+    if pos_x < min_x || pos_x > max_x {
+        return None;
+    }
+
+    let rel_x = pos_x - bounds.origin.x.as_f32();
+    Some(f64::from((rel_x / width).clamp(0.0, 1.0)))
 }
 
 pub(in crate::app) fn timeline_keyboard_time_for_key(

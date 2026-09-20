@@ -16,8 +16,9 @@ use super::preview_actions::{
 use super::preview_panel::{
     centered_offset, preview_crop_visual_rect, preview_presented_frame, preview_scroll_delta_y,
     preview_shell_state, preview_timeline_labels, preview_trim_enabled,
-    preview_visual_controls_visible, timeline_fraction_from_percent,
-    timeline_keyboard_time_for_key, timeline_slider_percent_from_bounds,
+    preview_timeline_drag_percent_from_bounds, preview_visual_controls_visible,
+    timeline_fraction_from_percent, timeline_keyboard_time_for_key,
+    timeline_slider_percent_from_bounds,
 };
 use super::primitives::frame_highlight_px;
 use super::settings_panel::{hex_to_subtitle_hsv, subtitle_hsv_to_hex};
@@ -1879,10 +1880,11 @@ mod frame_root_config {
     fn trim_preview_seek_state_overwrites_pending_without_starting_worker() {
         let mut state = TrimPreviewSeekState::default();
 
-        state.queue(10.0);
-        state.queue(20.0);
+        state.queue(10.0, false);
+        state.queue(20.0, true);
 
         assert_eq!(state.pending_seconds, Some(20.0));
+        assert!(state.pending_precise);
         assert!(!state.worker_active);
     }
 
@@ -1892,7 +1894,7 @@ mod frame_root_config {
             last_sent_seconds: Some(10.0),
             ..Default::default()
         };
-        state.queue(10.0 + (TRIM_PREVIEW_SEEK_EPSILON_SECONDS / 2.0));
+        state.queue(10.0 + (TRIM_PREVIEW_SEEK_EPSILON_SECONDS / 2.0), false);
 
         assert_eq!(state.take_next(), None);
         assert_eq!(state.pending_seconds, None);
@@ -1902,7 +1904,7 @@ mod frame_root_config {
     fn trim_preview_seek_state_finishes_with_restore_and_clears_after_completion() {
         let mut state = TrimPreviewSeekState::default();
         state.begin_drag(30.0);
-        state.queue(60.0);
+        state.queue(60.0, false);
 
         assert!(state.finish());
         assert_eq!(
@@ -1910,6 +1912,7 @@ mod frame_root_config {
             Some(TrimPreviewSeekRequest {
                 seconds: 30.0,
                 pause_first: false,
+                precise: true,
             })
         );
         assert!(state.complete_restore(30.0));
@@ -1927,22 +1930,24 @@ mod frame_root_config {
     fn trim_preview_seek_state_marks_only_next_request_for_pause() {
         let mut state = TrimPreviewSeekState::default();
         state.pause_before_next_seek();
-        state.queue(10.0);
+        state.queue(10.0, false);
 
         assert_eq!(
             state.take_next(),
             Some(TrimPreviewSeekRequest {
                 seconds: 10.0,
                 pause_first: true,
+                precise: false,
             })
         );
 
-        state.queue(20.0);
+        state.queue(20.0, true);
         assert_eq!(
             state.take_next(),
             Some(TrimPreviewSeekRequest {
                 seconds: 20.0,
                 pause_first: false,
+                precise: true,
             })
         );
     }
@@ -2067,6 +2072,42 @@ mod frame_root_config {
                 .and_then(|file| file.config.start_time.as_deref()),
             Some("00:00:22.500")
         );
+    }
+
+    #[test]
+    fn preview_timeline_drag_abort_lifecycle() {
+        let mut root = FrameRoot::new();
+        root.file_queue
+            .add_file(FileItem::from_path("video", "/tmp/one.mp4", 1));
+        root.source_metadata.mark_ready(
+            "video".to_string(),
+            SourceMetadata {
+                media_kind: Some(SourceKind::Video),
+                duration: Some("90.0".to_string()),
+                ..SourceMetadata::default()
+            },
+        );
+        root.preview_ui.playback =
+            preview_playback_state(PreviewMediaKind::Video, 90.0, None, None);
+        root.preview_ui.session = Some(test_video_preview_session("video"));
+
+        assert!(!root.preview_timeline_drag_aborted());
+
+        // 1. 开始拖拽
+        assert!(root.apply_preview_timeline_drag(TimelineDragTarget::Start, 0.25));
+        assert!(root.preview_ui.playback.dragging().is_some());
+
+        // 2. 越界触发 abort
+        assert!(root.abort_preview_timeline_drag());
+        assert!(root.preview_timeline_drag_aborted());
+        assert!(root.preview_ui.playback.dragging().is_none());
+
+        // 3. 重复 abort 不再触发
+        assert!(!root.abort_preview_timeline_drag());
+
+        // 4. 物理松开鼠标（end_drag）重置 aborted
+        assert!(root.end_preview_timeline_drag());
+        assert!(!root.preview_timeline_drag_aborted());
     }
 
     #[test]
@@ -4411,6 +4452,78 @@ mod preview_shell {
         assert_eq!(
             timeline_slider_percent_from_bounds(point(px(140.0), px(0.0)), bounds),
             1.0
+        );
+    }
+
+    #[test]
+    fn preview_timeline_drag_percent_from_bounds_enforces_spatial_box() {
+        let bounds = Bounds {
+            origin: point(px(100.0), px(200.0)),
+            size: size(px(400.0), px(30.0)),
+        };
+
+        // 1. 正常内部
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(300.0), px(215.0)), bounds),
+            Some(0.5)
+        );
+
+        // 2. 左边界缓冲（origin.x - 8.0 到 origin.x，即 92.0 ~ 100.0）clamp 到 0.0
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(100.0), px(215.0)), bounds),
+            Some(0.0)
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(95.0), px(215.0)), bounds),
+            Some(0.0)
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(92.0), px(215.0)), bounds),
+            Some(0.0)
+        );
+
+        // 3. 右边界缓冲（origin.x + width 到 + 8.0，即 500.0 ~ 508.0）clamp 到 1.0
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(500.0), px(215.0)), bounds),
+            Some(1.0)
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(505.0), px(215.0)), bounds),
+            Some(1.0)
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(508.0), px(215.0)), bounds),
+            Some(1.0)
+        );
+
+        // 4. 水平越界（< 92.0 或 > 508.0）
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(91.9), px(215.0)), bounds),
+            None
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(508.1), px(215.0)), bounds),
+            None
+        );
+
+        // 5. 垂直上边界（origin.y - 34.0 = 166.0）
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(300.0), px(166.0)), bounds),
+            Some(0.5)
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(300.0), px(165.9)), bounds),
+            None
+        );
+
+        // 6. 垂直下边界（origin.y + height + 16.0 = 200 + 30 + 16 = 246.0）
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(300.0), px(246.0)), bounds),
+            Some(0.5)
+        );
+        assert_eq!(
+            preview_timeline_drag_percent_from_bounds(point(px(300.0), px(246.1)), bounds),
+            None
         );
     }
 

@@ -2,6 +2,7 @@
 
 mod error;
 mod ffmpeg_backend;
+mod frame_cache;
 mod frame_store;
 mod metrics;
 mod renderer;
@@ -12,6 +13,7 @@ mod types;
 
 pub use error::*;
 pub use ffmpeg_backend::*;
+pub use frame_cache::*;
 pub use frame_store::*;
 pub use metrics::PreviewRuntimeMetrics;
 pub use renderer::*;

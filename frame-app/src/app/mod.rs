@@ -262,7 +262,7 @@ const PREVIEW_MIN_ADAPTIVE_HEIGHT: u32 = 360;
 const PREVIEW_DIMENSION_DEBOUNCE_INTERVAL: Duration = Duration::from_millis(120);
 const PREVIEW_FILTER_DEBOUNCE_INTERVAL: Duration = Duration::from_millis(120);
 const PREVIEW_FRAME_TICK_INTERVAL: Duration = Duration::from_millis(16);
-const TRIM_PREVIEW_SEEK_INTERVAL: Duration = Duration::from_millis(50);
+const TRIM_PREVIEW_SEEK_INTERVAL: Duration = Duration::from_millis(16);
 const TRIM_PREVIEW_SEEK_EPSILON_SECONDS: f64 = 1.0 / 240.0;
 const UPDATE_INSTALL_WAIT_MESSAGE: &str =
     "Finish or cancel active conversions before installing the update.";
@@ -569,6 +569,7 @@ struct PreviewUiState {
     overlay_image_dimensions: Option<PreviewOverlayImageDimensions>,
     overlay_opacity_slider_bounds: Option<Bounds<Pixels>>,
     timeline_track_bounds: Option<Bounds<Pixels>>,
+    timeline_drag_aborted: bool,
     playback_file_id: Option<String>,
     playback: PreviewPlaybackState,
     active_preview_dimensions: Option<PreviewRuntimeDimensions>,
@@ -606,6 +607,7 @@ impl Default for PreviewUiState {
             overlay_image_dimensions: None,
             overlay_opacity_slider_bounds: None,
             timeline_track_bounds: None,
+            timeline_drag_aborted: false,
             playback_file_id: None,
             playback: PreviewPlaybackState::new(false),
             active_preview_dimensions: None,
@@ -630,6 +632,7 @@ impl Default for PreviewUiState {
 struct TrimPreviewSeekState {
     restore_seconds: Option<f64>,
     pending_seconds: Option<f64>,
+    pending_precise: bool,
     last_sent_seconds: Option<f64>,
     worker_active: bool,
     pause_before_next_seek: bool,
@@ -641,6 +644,7 @@ struct TrimPreviewSeekState {
 struct TrimPreviewSeekRequest {
     seconds: f64,
     pause_first: bool,
+    precise: bool,
 }
 
 impl TrimPreviewSeekState {
@@ -671,8 +675,9 @@ impl TrimPreviewSeekState {
         self.pause_before_next_seek = true;
     }
 
-    const fn queue(&mut self, seconds: f64) {
+    const fn queue(&mut self, seconds: f64, precise: bool) {
         self.pending_seconds = Some(seconds);
+        self.pending_precise = precise;
     }
 
     fn take_next(&mut self) -> Option<TrimPreviewSeekRequest> {
@@ -682,7 +687,9 @@ impl TrimPreviewSeekState {
                 && self
                     .restore_seconds
                     .is_some_and(|restore| Self::seconds_match(restore, seconds));
+            let precise = is_restore || self.pending_precise;
             if !is_restore
+                && !precise
                 && self
                     .last_sent_seconds
                     .is_some_and(|last| Self::seconds_match(last, seconds))
@@ -694,8 +701,10 @@ impl TrimPreviewSeekState {
             let request = TrimPreviewSeekRequest {
                 seconds,
                 pause_first: self.pause_before_next_seek,
+                precise,
             };
             self.pause_before_next_seek = false;
+            self.pending_precise = false;
             return Some(request);
         }
     }
@@ -706,6 +715,7 @@ impl TrimPreviewSeekState {
             return false;
         };
         self.pending_seconds = Some(restore_seconds);
+        self.pending_precise = true;
         self.finish_after_restore = true;
         true
     }
@@ -880,7 +890,11 @@ struct SettingsSubtitleColorPickerBounds {
     outline_hue: Option<Bounds<Pixels>>,
 }
 
-#[derive(Clone, Copy)]
+#[expect(
+    dead_code,
+    reason = "Preset fields migrated to titlebar menu; kept for backward-compatible fixtures"
+)]
+#[derive(Clone)]
 struct SettingsRenderState<'a> {
     palette: &'static theme::ThemePalette,
     active_tab: SettingsTab,

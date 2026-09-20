@@ -1581,38 +1581,30 @@ impl FrameRoot {
         if self.preview_ui.playback.dragging().is_none() {
             if target == TimelineDragTarget::Scrub {
                 self.cancel_trim_preview_seek();
-                let command = self.preview_ui.playback.seek_to_percent(percent);
-                if command.pause && self.trim_preview_seek_available() {
-                    self.preview_ui.trim_preview_seek.pause_before_next_seek();
-                }
-                self.apply_preview_command_to_local_state(command);
-                if let Some(preview_seek_to) = command.seek_to {
-                    self.queue_trim_preview_seek(preview_seek_to, cx);
-                }
-                return true;
             }
-
             if !self.preview_ui.playback.begin_handle_drag(target) {
                 return false;
             }
             let was_playing = self.preview_ui.playback.is_playing();
             if self.trim_preview_seek_available() {
-                self.preview_ui
-                    .trim_preview_seek
-                    .begin_drag(self.preview_ui.playback.current_time());
+                if target != TimelineDragTarget::Scrub {
+                    self.preview_ui
+                        .trim_preview_seek
+                        .begin_drag(self.preview_ui.playback.current_time());
+                }
                 if was_playing {
                     self.preview_ui.trim_preview_seek.pause_before_next_seek();
                 }
             }
             if was_playing {
-                self.apply_preview_media_command(PlaybackMediaCommand::pause(), true, cx);
+                self.apply_preview_media_command(PlaybackMediaCommand::pause(), false, cx);
             }
         }
 
         let update = self.preview_ui.playback.drag_to_percent(percent);
         self.apply_preview_command_to_local_state(update.command);
         if let Some(preview_seek_to) = update.preview_seek_to {
-            self.queue_trim_preview_seek(preview_seek_to, cx);
+            self.queue_trim_preview_seek(preview_seek_to, false, cx);
         }
         true
     }
@@ -1655,16 +1647,43 @@ impl FrameRoot {
         let percent = timeline_slider_percent_from_bounds(position, bounds);
         self.cancel_trim_preview_seek();
         let command = self.preview_ui.playback.seek_once_to_percent(percent);
-        self.apply_preview_media_command(command, true, cx)
+        self.apply_preview_media_command(command, false, cx)
+    }
+
+    pub(in crate::app) fn preview_timeline_drag_aborted(&self) -> bool {
+        self.preview_ui.timeline_drag_aborted
+    }
+
+    pub(super) fn abort_preview_timeline_drag_with_context(&mut self, cx: &Context<Self>) -> bool {
+        if self.preview_ui.timeline_drag_aborted {
+            return false;
+        }
+        self.preview_ui.timeline_drag_aborted = true;
+        self.end_preview_timeline_drag_internal(Some(cx));
+        true
+    }
+
+    #[cfg(test)]
+    pub(super) fn abort_preview_timeline_drag(&mut self) -> bool {
+        if self.preview_ui.timeline_drag_aborted {
+            return false;
+        }
+        self.preview_ui.timeline_drag_aborted = true;
+        self.end_preview_timeline_drag_internal(None);
+        true
     }
 
     #[cfg(test)]
     pub(super) fn end_preview_timeline_drag(&mut self) -> bool {
-        self.end_preview_timeline_drag_internal(None)
+        let was_aborted = self.preview_ui.timeline_drag_aborted;
+        self.preview_ui.timeline_drag_aborted = false;
+        self.end_preview_timeline_drag_internal(None) || was_aborted
     }
 
     pub(super) fn end_preview_timeline_drag_with_context(&mut self, cx: &Context<Self>) -> bool {
-        self.end_preview_timeline_drag_internal(Some(cx))
+        let was_aborted = self.preview_ui.timeline_drag_aborted;
+        self.preview_ui.timeline_drag_aborted = false;
+        self.end_preview_timeline_drag_internal(Some(cx)) || was_aborted
     }
 
     fn end_preview_timeline_drag_internal(&mut self, cx: Option<&Context<Self>>) -> bool {
@@ -1677,6 +1696,9 @@ impl FrameRoot {
             .playback
             .dragging()
             .is_some_and(|target| target != TimelineDragTarget::Scrub);
+        if !was_trim_drag {
+            self.cancel_trim_preview_seek();
+        }
         let end = self.preview_ui.playback.end_drag();
         let mut changed = self.apply_preview_media_command(end.command, true, cx);
         if let Some(trim) = end.trim {
@@ -1750,12 +1772,17 @@ impl FrameRoot {
             })
     }
 
-    fn queue_trim_preview_seek(&mut self, seconds: f64, cx: Option<&Context<Self>>) -> bool {
+    fn queue_trim_preview_seek(
+        &mut self,
+        seconds: f64,
+        precise: bool,
+        cx: Option<&Context<Self>>,
+    ) -> bool {
         if !seconds.is_finite() || !self.trim_preview_seek_available() {
             return false;
         }
 
-        self.preview_ui.trim_preview_seek.queue(seconds);
+        self.preview_ui.trim_preview_seek.queue(seconds, precise);
         if let Some(cx) = cx {
             self.start_trim_preview_seek_worker(cx);
         }
@@ -1831,7 +1858,11 @@ impl FrameRoot {
                             if request.pause_first {
                                 session.command(PreviewCommand::Pause)?;
                             }
-                            session.command(PreviewCommand::SeekPrecise(request.seconds))
+                            if request.precise {
+                                session.command(PreviewCommand::SeekPrecise(request.seconds))
+                            } else {
+                                session.command(PreviewCommand::SeekFast(request.seconds))
+                            }
                         }
                     })
                     .await;

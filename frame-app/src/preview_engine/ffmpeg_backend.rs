@@ -28,8 +28,9 @@ use crate::{
 
 use super::metrics::{PreviewRuntimeMetricsStore, log_preview_runtime_metrics};
 use super::{
-    LatestFrameStore, PreviewDimensions, PreviewEngineError, PreviewRenderedFrame,
-    PreviewSessionConfig, PreviewSourceKind, rendered_frame_from_bgra_payload_with_image_id,
+    LatestFrameStore, PreviewDimensions, PreviewEngineError, PreviewFrameCache,
+    PreviewRenderedFrame, PreviewSessionConfig, PreviewSourceKind,
+    rendered_frame_from_bgra_payload_with_image_id,
 };
 
 const STDERR_RING_LINES: usize = 24;
@@ -45,6 +46,7 @@ const WARM_PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 pub struct RunningPreviewProcess {
     config: PreviewSessionConfig,
     frame_store: LatestFrameStore,
+    frame_cache: Arc<Mutex<PreviewFrameCache>>,
     metrics: PreviewRuntimeMetricsStore,
     executable: String,
     process: Arc<Mutex<RunningProcessState>>,
@@ -612,6 +614,7 @@ impl RunningPreviewProcess {
         precise: bool,
     ) -> Result<PreviewDimensions, PreviewEngineError> {
         let seconds = clamp_seek_seconds(seconds, config.duration_seconds)?;
+        lock_frame_cache(&self.frame_cache).clear();
         let dimensions = if matches!(
             config.source_kind,
             PreviewSourceKind::Video | PreviewSourceKind::Image
@@ -672,6 +675,7 @@ impl RunningPreviewProcess {
         Self {
             config,
             frame_store,
+            frame_cache: Arc::new(Mutex::new(PreviewFrameCache::default())),
             metrics,
             executable,
             process: Arc::new(Mutex::new(RunningProcessState::default())),
@@ -705,6 +709,21 @@ impl RunningPreviewProcess {
         seconds: f64,
         precise: bool,
     ) -> Result<PreviewDimensions, PreviewEngineError> {
+        if let Some(cached_frame) = {
+            let mut cache = lock_frame_cache(&self.frame_cache);
+            cache.get(seconds, precise, self.config.fps)
+        } {
+            let dimensions = cached_frame.dimensions();
+            let started_at = Instant::now();
+            let generation = self.prepare_playback_generation_at(seconds, started_at);
+            self.metrics
+                .record_video_frame_read(generation, cached_frame.byte_len, Duration::ZERO);
+            self.publish_frame_for_generation(cached_frame, Duration::ZERO, generation);
+            self.park_playback_generation(generation, seconds);
+            self.prewarm_audio_for_generation(&self.config, seconds, precise, generation);
+            return Ok(dimensions);
+        }
+
         let started_at = Instant::now();
         let frame = decode_single_preview_frame(
             &self.executable,
@@ -714,6 +733,10 @@ impl RunningPreviewProcess {
             self.next_render_image_identity(),
         )?;
         let dimensions = frame.frame.dimensions();
+        {
+            let mut cache = lock_frame_cache(&self.frame_cache);
+            cache.insert(seconds, precise, frame.frame.clone());
+        }
         let generation = self.prepare_playback_generation_at(seconds, started_at);
         self.metrics
             .record_video_frame_read(generation, frame.frame.byte_len, frame.read_elapsed);
@@ -2034,6 +2057,12 @@ fn join_worker(worker: Option<JoinHandle<()>>) {
     if let Some(worker) = worker {
         let _ = worker.join();
     }
+}
+
+fn lock_frame_cache(cache: &Mutex<PreviewFrameCache>) -> MutexGuard<'_, PreviewFrameCache> {
+    cache
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 fn lock_process(state: &Mutex<RunningProcessState>) -> MutexGuard<'_, RunningProcessState> {
