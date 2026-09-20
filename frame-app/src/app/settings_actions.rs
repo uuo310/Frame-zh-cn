@@ -330,6 +330,10 @@ impl FrameRoot {
         .detach();
     }
 
+    #[expect(
+        dead_code,
+        reason = "Legacy preset actions kept for testing or future extension"
+    )]
     pub(super) fn save_preset_from_draft(&mut self) -> bool {
         if self.update_installation_in_progress() || self.file_queue.selected_file_locked() {
             return false;
@@ -501,6 +505,10 @@ impl FrameRoot {
         true
     }
 
+    #[expect(
+        dead_code,
+        reason = "Legacy preset actions kept for testing or future extension"
+    )]
     pub(super) fn confirm_apply_preset_to_all(
         &self,
         preset_id: &str,

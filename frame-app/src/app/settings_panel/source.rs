@@ -1152,7 +1152,7 @@ fn settings_bitrate_window_popover(
     // 批 S：mouse_down 阶段阻断冒泡（与 preset_menu.rs:287 同款）——
     // 否则全局「点外即关」先在 mouse_down 关弹层、on_click 又 toggle 开，
     // 净效果是弹层永远合不上。
-    let mut trigger =
+    let trigger =
         trigger
             .on_mouse_down(MouseButton::Left, |_, _window, cx| {
                 cx.stop_propagation();

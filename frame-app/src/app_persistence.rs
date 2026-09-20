@@ -532,7 +532,7 @@ mod tests {
             .to_string();
 
         assert!(error.starts_with("failed to read app settings at "));
-        assert!(error.contains(path.to_string_lossy().as_ref()));
+        assert!(error.contains(redacted_path(&path).as_str()));
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
             .to_string();
 
         assert!(error.starts_with("failed to read legacy app settings at "));
-        assert!(error.contains(legacy_path.to_string_lossy().as_ref()));
+        assert!(error.contains(redacted_path(&legacy_path).as_str()));
     }
 
     #[test]
@@ -567,7 +567,7 @@ mod tests {
             .to_string();
 
         assert!(error.starts_with("failed to create the settings directory at "));
-        assert!(error.contains(parent.to_string_lossy().as_ref()));
+        assert!(error.contains(redacted_path(&parent).as_str()));
     }
 
     #[test]
@@ -584,7 +584,7 @@ mod tests {
             .to_string();
 
         assert!(error.starts_with("failed to create the temporary settings file at "));
-        assert!(error.contains(temp_path.to_string_lossy().as_ref()));
+        assert!(error.contains(redacted_path(&temp_path).as_str()));
     }
 
     #[test]
@@ -598,7 +598,7 @@ mod tests {
         .to_string();
 
         assert!(error.starts_with("failed to write the temporary settings file at "));
-        assert!(error.contains(path.to_string_lossy().as_ref()));
+        assert!(error.contains(redacted_path(&path).as_str()));
         assert!(error.ends_with(": test write failure"));
     }
 
@@ -615,7 +615,7 @@ mod tests {
             .to_string();
 
         assert!(error.starts_with("failed to replace the settings file at "));
-        assert!(error.contains(path.to_string_lossy().as_ref()));
+        assert!(error.contains(redacted_path(&path).as_str()));
         assert_eq!(
             fs::read(marker_path).expect("existing target should remain untouched"),
             b"existing data"

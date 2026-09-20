@@ -61,8 +61,6 @@ impl ConversionNotificationSummary {
     #[must_use]
     pub fn body(self) -> String {
         let processed_count = self.completed_count + self.error_count;
-        let file_suffix = if processed_count == 1 { "" } else { "s" };
-        let error_suffix = if self.error_count == 1 { "" } else { "s" };
 
         format!(
             "已处理 {} 个文件，含 {} 个错误。",

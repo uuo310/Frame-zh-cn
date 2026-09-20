@@ -694,12 +694,12 @@ pub fn apply_x265_psy_rdoq(config: &mut ConversionConfig, value: &str) -> bool {
     true
 }
 
-/// 编码兼容性 / ProRes 档位的合法取值（空串＝跟随默认）。
+/// 编码兼容性 / `ProRes` 档位的合法取值（空串＝跟随默认）。
 const X264_PROFILE_VALUES: [&str; 4] = ["", "baseline", "main", "high"];
 const PRORES_PROFILE_VALUES: [&str; 7] = ["", "proxy", "lt", "standard", "hq", "4444", "4444xq"];
 
 fn apply_profile_value(
-    config: &mut ConversionConfig,
+    config: &ConversionConfig,
     value: &str,
     codec: &str,
     allowed: &[&str],
@@ -743,7 +743,7 @@ pub fn apply_nvenc_h264_profile(config: &mut ConversionConfig, value: &str) -> b
     true
 }
 
-/// ProRes 档位：空＝跟随默认（prores_ks auto）。
+/// `ProRes` 档位：空＝跟随默认（`prores_ks` auto）。
 ///
 /// 4444／4444XQ 需要 4:4:4 像素格式——实测 4:2:0 下 `rc=0 但产出坏流`
 /// （标签 4444、数据 yuv422p12le）⇒ 选这两个档位时**自动配套**把像素格式切到
@@ -752,8 +752,7 @@ pub fn apply_prores_profile(config: &mut ConversionConfig, value: &str) -> bool 
     let Some(next) = apply_profile_value(config, value, "prores", &PRORES_PROFILE_VALUES) else {
         return false;
     };
-    let mut pixel_format_changed = false;
-    if frame_core::profile::is_prores_4444_tier(&next)
+    let pixel_format_changed = if frame_core::profile::is_prores_4444_tier(&next)
         && !frame_core::profile::is_four_four_four_pixel_format(&config.pixel_format)
     {
         if !is_video_pixel_format_allowed_for_container(&config.container, "prores", "yuv444p10le")
@@ -761,8 +760,10 @@ pub fn apply_prores_profile(config: &mut ConversionConfig, value: &str) -> bool 
             return false;
         }
         config.pixel_format = "yuv444p10le".to_string();
-        pixel_format_changed = true;
-    }
+        true
+    } else {
+        false
+    };
     let profile_changed = config.prores_profile != next;
     config.prores_profile = next;
     profile_changed || pixel_format_changed
@@ -819,7 +820,7 @@ pub fn apply_video_vbv_enabled(config: &mut ConversionConfig, enabled: bool) -> 
             return false;
         }
         let target = config.video_bitrate.parse::<u32>().unwrap_or(5000);
-        let maxrate = (f64::from(target) * 1.45).round() as u32;
+        let maxrate = crate::numeric::rounded_f64_to_u32(f64::from(target) * 1.45);
         let bufsize = maxrate * 2;
         let changed = config.video_maxrate != maxrate.to_string()
             || config.video_bufsize != bufsize.to_string();
