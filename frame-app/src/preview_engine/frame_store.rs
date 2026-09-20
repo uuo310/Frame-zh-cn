@@ -15,6 +15,7 @@ struct LatestFrameState {
     generation: u64,
     latest: Option<Arc<PreviewRenderedFrame>>,
     last_presented_generation: u64,
+    last_presented_timestamp_us: Option<u64>,
     stats: PreviewFrameStats,
     last_publish: Option<Instant>,
 }
@@ -86,6 +87,18 @@ impl LatestFrameStore {
         state.latest.is_some() && state.last_presented_generation < state.generation
     }
 
+    #[must_use]
+    pub fn last_presented_seconds(&self) -> Option<f64> {
+        let state = lock_state(&self.inner);
+        #[expect(
+            clippy::cast_precision_loss,
+            reason = "timestamp_us fits safely in f64 seconds"
+        )]
+        state
+            .last_presented_timestamp_us
+            .map(|us| (us as f64) / 1_000_000.0)
+    }
+
     pub fn mark_presented(&self, generation: u64) {
         let mut state = lock_state(&self.inner);
         if generation == 0
@@ -95,6 +108,9 @@ impl LatestFrameStore {
             return;
         }
         state.last_presented_generation = generation;
+        if let Some(latest) = &state.latest {
+            state.last_presented_timestamp_us = Some(latest.timestamp_us);
+        }
         state.stats.presented_frames = state.stats.presented_frames.saturating_add(1);
     }
 
@@ -103,6 +119,7 @@ impl LatestFrameStore {
         state.generation = state.generation.saturating_add(1);
         state.latest = None;
         state.last_presented_generation = state.generation;
+        state.last_presented_timestamp_us = None;
         state.last_publish = None;
     }
 }

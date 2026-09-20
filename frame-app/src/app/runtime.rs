@@ -72,18 +72,11 @@ pub fn open_frame_window(cx: &mut App) {
             root.startup_update_check(cx);
             root
         });
-        // Freeze preview playback for the duration of a window drag: the
-        // Windows backend suppresses repaints while the drag is active, so the
-        // playback clock has to pause with it to avoid a jump on release.
         let root_for_drag = root.downgrade();
         window.on_drag_session_changed(cx, move |_, cx, dragging| {
             if dragging {
                 root_for_drag
                     .update(cx, |root, cx| root.pause_playback_for_window_drag(cx))
-                    .ok();
-            } else {
-                root_for_drag
-                    .update(cx, |root, cx| root.resume_playback_after_window_drag(cx))
                     .ok();
             }
         });

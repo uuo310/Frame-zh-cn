@@ -1896,22 +1896,12 @@ impl FrameRoot {
         false
     }
 
-    /// Pauses in-progress preview playback when a window drag starts, so the
-    /// frozen picture and the playback clock stay in sync while the window
-    /// repaints are suppressed during the drag.
+    /// Pauses in-progress preview playback when a window drag starts,
+    /// keeping the frozen picture and the playback clock in sync.
+    /// Does not auto-resume when the drag ends.
     pub(super) fn pause_playback_for_window_drag(&mut self, cx: &Context<Self>) {
         if self.preview_ui.playback.is_playing() {
             self.apply_preview_media_command(PlaybackMediaCommand::pause(), true, Some(cx));
-            self.window_drag_paused_playback = true;
-        }
-    }
-
-    /// Resumes playback paused by [`Self::pause_playback_for_window_drag`] when
-    /// the drag ends; playback continues from the frozen frame without a jump.
-    pub(super) fn resume_playback_after_window_drag(&mut self, cx: &Context<Self>) {
-        if self.window_drag_paused_playback {
-            self.window_drag_paused_playback = false;
-            self.apply_preview_media_command(PlaybackMediaCommand::play(), true, Some(cx));
         }
     }
 
@@ -2072,6 +2062,14 @@ fn preview_runtime_request(
         visual_hash: preview_visual_hash(&preview_config),
         audio_hash: preview_audio_hash(&preview_config, selected_audio_track),
     };
+    let preview_fps = metadata
+        .frame_rate
+        .filter(|fps| fps.is_finite() && *fps > 0.0)
+        .map(|fps| {
+            (fps.round() as u32)
+                .clamp(crate::preview_engine::MIN_PREVIEW_FPS, crate::preview_engine::MAX_PREVIEW_FPS)
+        })
+        .unwrap_or(DEFAULT_PREVIEW_FPS);
     let config = PreviewSessionConfig {
         file_id: key.file_id.clone(),
         path: PathBuf::from(&selected_file.path),
@@ -2082,7 +2080,7 @@ fn preview_runtime_request(
         duration_seconds,
         max_width: preview_dimensions.max_width,
         max_height: preview_dimensions.max_height,
-        fps: DEFAULT_PREVIEW_FPS,
+        fps: preview_fps,
         conversion_config: core_config,
     };
 

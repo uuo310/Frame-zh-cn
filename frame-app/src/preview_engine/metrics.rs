@@ -121,6 +121,7 @@ impl PreviewRuntimeMetricsStore {
         );
     }
 
+    #[expect(dead_code, reason = "Reserved for future frame drop telemetry")]
     pub(super) fn record_video_frame_dropped(&self, generation: u64) {
         let mut state = lock_metrics(&self.inner);
         if state.metrics.playback_generation != generation {

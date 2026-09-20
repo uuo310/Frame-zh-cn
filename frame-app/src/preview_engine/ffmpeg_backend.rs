@@ -40,19 +40,21 @@ const AUDIO_START_READY_TIMEOUT: Duration = Duration::from_secs(2);
 const AUDIO_PREBUFFER_MS: u32 = 30;
 const VIDEO_START_WAIT_INTERVAL: Duration = Duration::from_millis(2);
 const VIDEO_FRAME_TIMING_EPSILON_SECONDS: f64 = 0.002;
+const WARM_PAUSE_TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct RunningPreviewProcess {
     config: PreviewSessionConfig,
     frame_store: LatestFrameStore,
     metrics: PreviewRuntimeMetricsStore,
     executable: String,
-    process: Mutex<RunningProcessState>,
-    audio_process: Mutex<RunningProcessState>,
-    pending_audio_start: Mutex<Option<PendingAudioStart>>,
+    process: Arc<Mutex<RunningProcessState>>,
+    audio_process: Arc<Mutex<RunningProcessState>>,
+    pending_audio_start: Arc<Mutex<Option<PendingAudioStart>>>,
     playback: Arc<Mutex<PreviewPlaybackClock>>,
     render_image_id: ImageId,
     render_image_version: Arc<AtomicU64>,
     stderr: Arc<Mutex<VecDeque<String>>>,
+    warm_pause_epoch: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Default)]
@@ -71,6 +73,7 @@ struct PreviewPlaybackClock {
     started_at: Instant,
     playing: bool,
     ended: bool,
+    warm_paused: bool,
 }
 
 struct ProcessHandles {
@@ -188,6 +191,7 @@ impl PreviewPlaybackClock {
         self.started_at = Instant::now();
         self.playing = false;
         self.ended = false;
+        self.warm_paused = false;
         self.generation
     }
 
@@ -200,6 +204,7 @@ impl PreviewPlaybackClock {
         self.started_at = Instant::now();
         self.playing = true;
         self.ended = false;
+        self.warm_paused = false;
     }
 
     fn park_generation(&mut self, generation: u64, seconds: f64) {
@@ -211,6 +216,40 @@ impl PreviewPlaybackClock {
         self.started_at = Instant::now();
         self.playing = false;
         self.ended = false;
+        self.warm_paused = false;
+    }
+
+    fn pause_playback(&mut self, presented_seconds: Option<f64>) {
+        if !self.playing {
+            return;
+        }
+        if let Some(presented) = presented_seconds {
+            if presented >= self.base_seconds {
+                self.base_seconds = presented;
+                self.last_frame_seconds = presented;
+            } else {
+                self.base_seconds += self.started_at.elapsed().as_secs_f64();
+            }
+        } else if self.last_frame_seconds > self.base_seconds {
+            self.base_seconds = self.last_frame_seconds;
+        } else {
+            self.base_seconds += self.started_at.elapsed().as_secs_f64();
+        }
+        self.playing = false;
+        self.warm_paused = true;
+    }
+
+    fn resume_playback(&mut self) {
+        if self.playing {
+            return;
+        }
+        self.started_at = Instant::now();
+        self.playing = true;
+        self.warm_paused = false;
+    }
+
+    fn mark_cold_paused(&mut self) {
+        self.warm_paused = false;
     }
 
     const fn generation_matches(&self, generation: u64) -> bool {
@@ -392,29 +431,99 @@ fn build_audio_output_stream_u16(
 }
 
 impl RunningPreviewProcess {
-    /// Pauses preview playback by terminating the active `FFmpeg` process.
+    /// Pauses preview playback.
+    ///
+    /// When playback is active, enters a warm-paused state where child decoding
+    /// processes remain alive and suspended by stdout backpressure. A background
+    /// timeout thread is spawned to downgrade to cold pause (terminating child
+    /// processes) if playback does not resume within [`WARM_PAUSE_TIMEOUT`].
     ///
     /// # Errors
     ///
-    /// Returns an error when the process cannot be terminated or reaped.
+    /// Returns an error when child processes cannot be terminated.
     pub fn pause(&self) -> Result<(), PreviewEngineError> {
-        self.stop_running_processes()?;
-        let (generation, seconds) = {
+        let presented_seconds = self.frame_store.last_presented_seconds();
+        let (generation, seconds, was_playing) = {
             let mut playback = lock_playback(&self.playback);
-            playback.playing = false;
-            (playback.generation, playback.last_frame_seconds)
+            let was_playing = playback.playing;
+            if was_playing {
+                playback.pause_playback(presented_seconds);
+            }
+            (
+                playback.generation,
+                playback.last_frame_seconds,
+                was_playing,
+            )
         };
-        self.prewarm_audio_for_generation(&self.config, seconds, true, generation);
+
+        if was_playing {
+            let epoch = self.warm_pause_epoch.fetch_add(1, Ordering::SeqCst) + 1;
+            let warm_pause_epoch = Arc::clone(&self.warm_pause_epoch);
+            let playback = Arc::clone(&self.playback);
+            let process = Arc::clone(&self.process);
+            let audio_process = Arc::clone(&self.audio_process);
+            let pending_audio_start = Arc::clone(&self.pending_audio_start);
+
+            thread::Builder::new()
+                .name("frame-preview-warm-pause-timeout".to_string())
+                .spawn(move || {
+                    thread::sleep(WARM_PAUSE_TIMEOUT);
+                    if warm_pause_epoch.load(Ordering::SeqCst) == epoch {
+                        let mut playback_guard = lock_playback(&playback);
+                        if playback_guard.warm_paused
+                            && playback_guard.generation_matches(generation)
+                        {
+                            playback_guard.mark_cold_paused();
+                            drop(playback_guard);
+                            *lock_pending_audio_start(&pending_audio_start) = None;
+                            let _ = stop_process_handles(take_process_handles(&process));
+                            let _ = stop_process_handles(take_process_handles(&audio_process));
+                        }
+                    }
+                })
+                .map_err(|err| {
+                    PreviewEngineError::Ffmpeg(format!("failed to spawn timeout thread: {err}"))
+                })?;
+        } else {
+            self.stop_running_processes()?;
+            self.prewarm_audio_for_generation(&self.config, seconds, true, generation);
+        }
         Ok(())
     }
 
-    /// Resumes preview playback by spawning a new `FFmpeg` process at the last
-    /// published frame timestamp.
+    /// Resumes preview playback.
+    ///
+    /// If playback is currently warm-paused with running child processes,
+    /// unfreezes the clock and stream workers for zero-latency resume.
+    /// Otherwise, spawns a new `FFmpeg` process at the last published frame
+    /// timestamp.
     ///
     /// # Errors
     ///
     /// Returns an error when `FFmpeg` cannot be spawned.
     pub fn resume(&self) -> Result<(), PreviewEngineError> {
+        let is_warm_paused = {
+            let mut playback = lock_playback(&self.playback);
+            if playback.warm_paused && !playback.ended {
+                playback.resume_playback();
+                true
+            } else {
+                false
+            }
+        };
+
+        if is_warm_paused {
+            self.warm_pause_epoch.fetch_add(1, Ordering::SeqCst);
+            let processes_alive = {
+                let video_state = lock_process(&self.process);
+                let audio_state = lock_process(&self.audio_process);
+                video_state.child.is_some() || audio_state.child.is_some()
+            };
+            if processes_alive {
+                return Ok(());
+            }
+        }
+
         let seconds = {
             let playback = lock_playback(&self.playback);
             if playback.ended {
@@ -565,9 +674,9 @@ impl RunningPreviewProcess {
             frame_store,
             metrics,
             executable,
-            process: Mutex::new(RunningProcessState::default()),
-            audio_process: Mutex::new(RunningProcessState::default()),
-            pending_audio_start: Mutex::new(None),
+            process: Arc::new(Mutex::new(RunningProcessState::default())),
+            audio_process: Arc::new(Mutex::new(RunningProcessState::default())),
+            pending_audio_start: Arc::new(Mutex::new(None)),
             playback: Arc::new(Mutex::new(PreviewPlaybackClock {
                 generation: 0,
                 base_seconds: start_seconds,
@@ -575,10 +684,12 @@ impl RunningPreviewProcess {
                 started_at: Instant::now(),
                 playing: false,
                 ended: false,
+                warm_paused: false,
             })),
             render_image_id: RenderImage::new_image_id(),
             render_image_version: Arc::new(AtomicU64::new(1)),
             stderr: Arc::new(Mutex::new(VecDeque::with_capacity(STDERR_RING_LINES))),
+            warm_pause_epoch: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -1084,6 +1195,8 @@ impl RunningPreviewProcess {
     }
 
     fn stop_running_processes(&self) -> Result<(), PreviewEngineError> {
+        self.warm_pause_epoch.fetch_add(1, Ordering::SeqCst);
+        lock_playback(&self.playback).mark_cold_paused();
         self.stop_video_process()?;
         self.stop_audio_process()?;
         Ok(())
@@ -1448,17 +1561,6 @@ fn spawn_stdout_worker(
                             spec.frame_bytes,
                             read_elapsed,
                         );
-                        if frame_store.has_unpresented_frame() {
-                            if update_last_frame_seconds(
-                                &playback,
-                                spec.generation,
-                                timestamp_seconds,
-                            ) {
-                                metrics.record_video_frame_dropped(spec.generation);
-                            }
-                            frame_index = frame_index.saturating_add(1);
-                            continue;
-                        }
 
                         let Ok(frame) = rendered_preview_frame_from_payload(
                             spec.width,
@@ -1547,6 +1649,17 @@ fn spawn_audio_stdout_worker(
                 }
                 if !clock_generation_matches(&config.playback, config.generation) {
                     break;
+                }
+
+                if output_started {
+                    match playback_stream_state(&config.playback, config.generation) {
+                        PlaybackStreamState::Ready => {}
+                        PlaybackStreamState::Waiting => {
+                            thread::sleep(Duration::from_millis(2));
+                            continue;
+                        }
+                        PlaybackStreamState::Stale => break,
+                    }
                 }
 
                 match stdout.read(&mut read_buffer) {
@@ -2053,6 +2166,7 @@ mod tests {
             started_at: Instant::now(),
             playing: true,
             ended: true,
+            warm_paused: false,
         };
 
         let generation = clock.prepare_generation(2.5);
@@ -2062,6 +2176,7 @@ mod tests {
         assert!((clock.last_frame_seconds - 2.5).abs() <= f64::EPSILON);
         assert!(!clock.playing);
         assert!(!clock.ended);
+        assert!(!clock.warm_paused);
     }
 
     #[test]
@@ -2073,6 +2188,7 @@ mod tests {
             started_at: Instant::now(),
             playing: true,
             ended: false,
+            warm_paused: false,
         }));
         let generation = lock_playback(&playback).prepare_generation(2.5);
 
@@ -2098,6 +2214,7 @@ mod tests {
             started_at: Instant::now(),
             playing: true,
             ended: false,
+            warm_paused: false,
         }));
 
         assert_eq!(
@@ -2118,6 +2235,7 @@ mod tests {
             started_at,
             playing: true,
             ended: false,
+            warm_paused: false,
         }));
 
         assert_eq!(
@@ -2135,6 +2253,7 @@ mod tests {
             started_at: Instant::now(),
             playing: false,
             ended: false,
+            warm_paused: false,
         }));
         let stop_requested = AtomicBool::new(true);
 
@@ -2153,6 +2272,7 @@ mod tests {
             started_at: Instant::now(),
             playing: true,
             ended: false,
+            warm_paused: false,
         }));
 
         let updated = update_last_frame_seconds(&playback, 1, 4.0);
@@ -2211,6 +2331,7 @@ mod tests {
             started_at: Instant::now(),
             playing: false,
             ended: false,
+            warm_paused: false,
         }));
         let mut data = [1.0_f32, 1.0];
 
@@ -2236,6 +2357,7 @@ mod tests {
             started_at: Instant::now(),
             playing: true,
             ended: false,
+            warm_paused: false,
         }));
         let mut data = [0.0_f32, 0.0];
 
@@ -2245,6 +2367,113 @@ mod tests {
         assert!(data[1].abs() <= f32::EPSILON);
         assert!(lock_audio_buffer(&buffer).samples.is_empty());
         assert_eq!(metrics.snapshot().audio_output_callbacks, 1);
+    }
+
+    #[test]
+    fn preview_playback_clock_warm_pause_freezes_and_resumes() {
+        let started_at = Instant::now()
+            .checked_sub(Duration::from_millis(50))
+            .expect("timestamp representable");
+        let mut clock = PreviewPlaybackClock {
+            generation: 1,
+            base_seconds: 1.0,
+            last_frame_seconds: 1.0,
+            started_at,
+            playing: true,
+            ended: false,
+            warm_paused: false,
+        };
+
+        clock.pause_playback(None);
+
+        assert!(!clock.playing);
+        assert!(clock.warm_paused);
+        assert!(clock.base_seconds >= 1.049);
+
+        let frozen_base = clock.base_seconds;
+        thread::sleep(Duration::from_millis(10));
+        assert!((clock.base_seconds - frozen_base).abs() <= f64::EPSILON);
+
+        clock.resume_playback();
+
+        assert!(clock.playing);
+        assert!(!clock.warm_paused);
+        assert!((clock.base_seconds - frozen_base).abs() <= f64::EPSILON);
+    }
+
+    #[test]
+    fn preview_playback_clock_warm_pause_aligns_to_last_frame_seconds() {
+        let started_at = Instant::now()
+            .checked_sub(Duration::from_millis(70))
+            .expect("timestamp representable");
+        let mut clock = PreviewPlaybackClock {
+            generation: 1,
+            base_seconds: 1.0,
+            last_frame_seconds: 1.040,
+            started_at,
+            playing: true,
+            ended: false,
+            warm_paused: false,
+        };
+
+        clock.pause_playback(None);
+
+        assert!(!clock.playing);
+        assert!(clock.warm_paused);
+        assert!((clock.base_seconds - 1.040).abs() <= f64::EPSILON);
+
+        clock.resume_playback();
+
+        assert!(clock.playing);
+        assert!(!clock.warm_paused);
+        assert!((clock.base_seconds - 1.040).abs() <= f64::EPSILON);
+    }
+
+    #[test]
+    fn preview_playback_clock_warm_pause_aligns_to_presented_seconds() {
+        let started_at = Instant::now()
+            .checked_sub(Duration::from_millis(70))
+            .expect("timestamp representable");
+        let mut clock = PreviewPlaybackClock {
+            generation: 1,
+            base_seconds: 1.0,
+            last_frame_seconds: 1.050,
+            started_at,
+            playing: true,
+            ended: false,
+            warm_paused: false,
+        };
+
+        // Screen actually presented 1.020s, even though reader read 1.050s
+        clock.pause_playback(Some(1.020));
+
+        assert!(!clock.playing);
+        assert!(clock.warm_paused);
+        assert!((clock.base_seconds - 1.020).abs() <= f64::EPSILON);
+        assert!((clock.last_frame_seconds - 1.020).abs() <= f64::EPSILON);
+
+        clock.resume_playback();
+
+        assert!(clock.playing);
+        assert!(!clock.warm_paused);
+        assert!((clock.base_seconds - 1.020).abs() <= f64::EPSILON);
+    }
+
+    #[test]
+    fn preview_playback_clock_mark_cold_paused_clears_flag() {
+        let mut clock = PreviewPlaybackClock {
+            generation: 1,
+            base_seconds: 1.0,
+            last_frame_seconds: 1.0,
+            started_at: Instant::now(),
+            playing: false,
+            ended: false,
+            warm_paused: true,
+        };
+
+        clock.mark_cold_paused();
+
+        assert!(!clock.warm_paused);
     }
 
     #[test]
