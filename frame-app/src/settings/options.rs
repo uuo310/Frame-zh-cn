@@ -780,6 +780,7 @@ pub fn default_presets() -> Vec<PresetDefinition> {
                     mode: MetadataMode::Clean,
                     ..MetadataConfig::default()
                 },
+                pixel_format: "yuv420p".to_string(),
                 ..preset_config("mp4")
             },
         ),
