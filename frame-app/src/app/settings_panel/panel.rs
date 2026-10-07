@@ -309,6 +309,8 @@ pub(in crate::app) fn settings_tab_content(
                 x264_psy_rd: settings.video_x264_psy_rd_focus,
                 x265_psy_rd: settings.video_x265_psy_rd_focus,
                 x265_psy_rdoq: settings.video_x265_psy_rdoq_focus,
+                x265_rd_level: settings.video_x265_rd_level_focus,
+                x265_rdoq_level: settings.video_x265_rdoq_level_focus,
                 gif_loop: settings.gif_loop_focus,
             },
             settings.video_pixel_format_select,

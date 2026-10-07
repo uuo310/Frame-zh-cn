@@ -119,6 +119,8 @@ pub fn core_config_from_gpui(config: &GpuiConversionConfig) -> CoreConversionCon
         x264_psy_rd: config.x264_psy_rd.clone(),
         x265_psy_rd: config.x265_psy_rd.clone(),
         x265_psy_rdoq: config.x265_psy_rdoq.clone(),
+        x265_rd_level: config.x265_rd_level.clone(),
+        x265_rdoq_level: config.x265_rdoq_level.clone(),
         x264_profile: config.x264_profile.clone(),
         nvenc_h264_profile: config.nvenc_h264_profile.clone(),
         prores_profile: config.prores_profile.clone(),

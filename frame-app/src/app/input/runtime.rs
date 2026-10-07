@@ -33,6 +33,8 @@ pub(in crate::app) enum FrameTextInputKind {
     VideoX264PsyRd,
     VideoX265PsyRd,
     VideoX265PsyRdoq,
+    VideoX265RdLevel,
+    VideoX265RdoqLevel,
     GifLoop,
     PreviewStartTime,
     PreviewEndTime,
@@ -52,7 +54,7 @@ pub(in crate::app) enum FrameTextInputKind {
 }
 
 impl FrameTextInputKind {
-    pub(in crate::app) const ALL: [Self; 27] = [
+    pub(in crate::app) const ALL: [Self; 29] = [
         Self::MaxConcurrency,
         Self::OutputName,
         Self::AudioBitrate,
@@ -64,6 +66,8 @@ impl FrameTextInputKind {
         Self::VideoX264PsyRd,
         Self::VideoX265PsyRd,
         Self::VideoX265PsyRdoq,
+        Self::VideoX265RdLevel,
+        Self::VideoX265RdoqLevel,
         Self::GifLoop,
         Self::PreviewStartTime,
         Self::PreviewEndTime,
@@ -95,6 +99,8 @@ impl FrameTextInputKind {
             Self::VideoX264PsyRd => "H.264 心理视觉强度",
             Self::VideoX265PsyRd => "H.265 心理视觉强度",
             Self::VideoX265PsyRdoq => "H.265 心理视觉量化",
+            Self::VideoX265RdLevel => "H.265 RDO 深度",
+            Self::VideoX265RdoqLevel => "H.265 RDOQ 级别",
             Self::GifLoop => "GIF 循环次数",
             Self::PreviewStartTime => "预览开始时间",
             Self::PreviewEndTime => "预览结束时间",
@@ -133,12 +139,17 @@ impl FrameTextInputKind {
         )
     }
 
-    /// 心理视觉（psy）三个数值字段：占位写的是「默认值（跟随默认）」这类提示，
-    /// 因此渲染成斜体且比常规占位再淡一档。字号随正文，不与元数据页共用小一号。
+    /// 心理视觉区数值字段（psy-rd／psy-rdoq／rdLevel／rdoq-level）：占位写的是
+    /// 「默认值（跟随默认）」这类提示，因此渲染成斜体且比常规占位再淡一档。
+    /// 字号随正文，不与元数据页共用小一号。
     pub(in crate::app) const fn is_psy_field(self) -> bool {
         matches!(
             self,
-            Self::VideoX264PsyRd | Self::VideoX265PsyRd | Self::VideoX265PsyRdoq
+            Self::VideoX264PsyRd
+                | Self::VideoX265PsyRd
+                | Self::VideoX265PsyRdoq
+                | Self::VideoX265RdLevel
+                | Self::VideoX265RdoqLevel
         )
     }
 }
@@ -244,6 +255,8 @@ pub(in crate::app) struct FrameTextInputStore {
     video_x264_psy_rd: FrameTextInputRuntime,
     video_x265_psy_rd: FrameTextInputRuntime,
     video_x265_psy_rdoq: FrameTextInputRuntime,
+    video_x265_rd_level: FrameTextInputRuntime,
+    video_x265_rdoq_level: FrameTextInputRuntime,
     gif_loop: FrameTextInputRuntime,
     preview_start_time: FrameTextInputRuntime,
     preview_end_time: FrameTextInputRuntime,
@@ -276,6 +289,8 @@ impl FrameTextInputStore {
             FrameTextInputKind::VideoX264PsyRd => &self.video_x264_psy_rd,
             FrameTextInputKind::VideoX265PsyRd => &self.video_x265_psy_rd,
             FrameTextInputKind::VideoX265PsyRdoq => &self.video_x265_psy_rdoq,
+            FrameTextInputKind::VideoX265RdLevel => &self.video_x265_rd_level,
+            FrameTextInputKind::VideoX265RdoqLevel => &self.video_x265_rdoq_level,
             FrameTextInputKind::GifLoop => &self.gif_loop,
             FrameTextInputKind::PreviewStartTime => &self.preview_start_time,
             FrameTextInputKind::PreviewEndTime => &self.preview_end_time,
@@ -311,6 +326,8 @@ impl FrameTextInputStore {
             FrameTextInputKind::VideoX264PsyRd => &mut self.video_x264_psy_rd,
             FrameTextInputKind::VideoX265PsyRd => &mut self.video_x265_psy_rd,
             FrameTextInputKind::VideoX265PsyRdoq => &mut self.video_x265_psy_rdoq,
+            FrameTextInputKind::VideoX265RdLevel => &mut self.video_x265_rd_level,
+            FrameTextInputKind::VideoX265RdoqLevel => &mut self.video_x265_rdoq_level,
             FrameTextInputKind::GifLoop => &mut self.gif_loop,
             FrameTextInputKind::PreviewStartTime => &mut self.preview_start_time,
             FrameTextInputKind::PreviewEndTime => &mut self.preview_end_time,
@@ -344,6 +361,8 @@ pub(in crate::app) struct FrameTextInputFocusStore {
     video_x264_psy_rd: Option<FocusHandle>,
     video_x265_psy_rd: Option<FocusHandle>,
     video_x265_psy_rdoq: Option<FocusHandle>,
+    video_x265_rd_level: Option<FocusHandle>,
+    video_x265_rdoq_level: Option<FocusHandle>,
     gif_loop: Option<FocusHandle>,
     preview_start_time: Option<FocusHandle>,
     preview_end_time: Option<FocusHandle>,
@@ -376,6 +395,8 @@ impl FrameTextInputFocusStore {
             FrameTextInputKind::VideoX264PsyRd => self.video_x264_psy_rd.as_ref(),
             FrameTextInputKind::VideoX265PsyRd => self.video_x265_psy_rd.as_ref(),
             FrameTextInputKind::VideoX265PsyRdoq => self.video_x265_psy_rdoq.as_ref(),
+            FrameTextInputKind::VideoX265RdLevel => self.video_x265_rd_level.as_ref(),
+            FrameTextInputKind::VideoX265RdoqLevel => self.video_x265_rdoq_level.as_ref(),
             FrameTextInputKind::GifLoop => self.gif_loop.as_ref(),
             FrameTextInputKind::PreviewStartTime => self.preview_start_time.as_ref(),
             FrameTextInputKind::PreviewEndTime => self.preview_end_time.as_ref(),
@@ -413,6 +434,8 @@ impl FrameTextInputFocusStore {
             FrameTextInputKind::VideoX264PsyRd => &mut self.video_x264_psy_rd,
             FrameTextInputKind::VideoX265PsyRd => &mut self.video_x265_psy_rd,
             FrameTextInputKind::VideoX265PsyRdoq => &mut self.video_x265_psy_rdoq,
+            FrameTextInputKind::VideoX265RdLevel => &mut self.video_x265_rd_level,
+            FrameTextInputKind::VideoX265RdoqLevel => &mut self.video_x265_rdoq_level,
             FrameTextInputKind::GifLoop => &mut self.gif_loop,
             FrameTextInputKind::PreviewStartTime => &mut self.preview_start_time,
             FrameTextInputKind::PreviewEndTime => &mut self.preview_end_time,

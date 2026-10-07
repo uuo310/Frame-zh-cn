@@ -1598,6 +1598,8 @@ fn base_config(container: &str, video_codec: &str) -> ConversionConfig {
         x264_psy_rd: String::new(),
         x265_psy_rd: String::new(),
         x265_psy_rdoq: String::new(),
+        x265_rd_level: String::new(),
+        x265_rdoq_level: String::new(),
         x264_profile: String::new(),
         nvenc_h264_profile: String::new(),
         prores_profile: String::new(),

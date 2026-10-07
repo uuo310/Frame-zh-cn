@@ -4093,6 +4093,8 @@ mod preview_shell {
             video_x264_psy_rd_focus: None,
             video_x265_psy_rd_focus: None,
             video_x265_psy_rdoq_focus: None,
+            video_x265_rd_level_focus: None,
+            video_x265_rdoq_level_focus: None,
             gif_loop_focus: None,
             video_pixel_format_select: SettingsVideoSelectUi {
                 popover: PopoverState::Hidden,

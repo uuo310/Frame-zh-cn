@@ -751,15 +751,19 @@ pub fn build_ffmpeg_args_with_hwaccel(
         args.push("2".to_string());
     }
 
-    // -x265-params 单条合并：psy（率控无关，恒定质量/目标码率都生效）与两遍精炼
-    // （仅两遍激活）共用一条键值串，不依赖 ffmpeg 对重复字典参数的合并语义。
+    // -x265-params 单条合并：心理视觉区（rd／rdoq-level／psy-rd／psy-rdoq，
+    // 率控无关，恒定质量/目标码率都生效）与两遍精炼（仅两遍激活）共用一条
+    // 键值串，不依赖 ffmpeg 对重复字典参数的合并语义。
     let mut x265_keys: Vec<String> = Vec::new();
-    if let Some(psy_keys) = psy::x265_psy_keys(
+    if let Some(perception_keys) = psy::x265_perception_keys(
         &config.video_codec,
+        &config.preset,
+        &config.x265_rd_level,
+        &config.x265_rdoq_level,
         &config.x265_psy_rd,
         &config.x265_psy_rdoq,
     ) {
-        x265_keys.push(psy_keys);
+        x265_keys.push(perception_keys);
     }
     if two_pass_active {
         // x265 两遍精炼是两遍自身的附加开关；x264/SVT 无对应参数。
@@ -776,8 +780,10 @@ pub fn build_ffmpeg_args_with_hwaccel(
         args.push(x265_keys.join(":"));
     }
 
-    // -x264-params：psy（率控无关）。
-    if let Some(x264_params) = psy::x264_params(&config.video_codec, &config.x264_psy_rd) {
+    // -x264-params：psy（率控无关；subme<6 的档位不下发）。
+    if let Some(x264_params) =
+        psy::x264_params(&config.video_codec, &config.preset, &config.x264_psy_rd)
+    {
         args.push("-x264-params".to_string());
         args.push(x264_params);
     }
@@ -1678,6 +1684,8 @@ mod tests {
             x264_psy_rd: String::new(),
             x265_psy_rd: String::new(),
             x265_psy_rdoq: String::new(),
+            x265_rd_level: String::new(),
+            x265_rdoq_level: String::new(),
             x264_profile: String::new(),
             nvenc_h264_profile: String::new(),
             prores_profile: String::new(),
@@ -2252,11 +2260,14 @@ mod tests {
 
     #[test]
     fn psy_params_travel_in_a_single_merged_params_flag() {
-        // x265：psy 与两遍精炼合并成一条 -x265-params
+        // x265：心理视觉区全键与两遍精炼合并成一条 -x265-params
         let mut merged = sample_config("mp4", "libx265");
         merged.video_bitrate_mode = "bitrate".to_string();
         merged.video_two_pass = true;
         merged.x265_multipass_opt_analysis = true;
+        merged.preset = "slow".to_string();
+        merged.x265_rd_level = "5".to_string();
+        merged.x265_rdoq_level = "1".to_string();
         merged.x265_psy_rd = "4.5".to_string();
         merged.x265_psy_rdoq = "10".to_string();
         let args = build_ffmpeg_args("in.mp4", "out.mp4", &merged, &sample_probe()).unwrap();
@@ -2264,9 +2275,9 @@ mod tests {
             args_contains_pair(
                 &args,
                 "-x265-params",
-                "psy-rd=4.5:psy-rdoq=10:rdoq-level=2:multi-pass-opt-analysis=1",
+                "rd=5:rdoq-level=1:psy-rd=4.5:psy-rdoq=10:multi-pass-opt-analysis=1",
             ),
-            "psy 与两遍精炼应合并为一条 -x265-params：{args:?}"
+            "心理视觉区与两遍精炼应合并为一条 -x265-params：{args:?}"
         );
 
         // 恒定质量档：无 -pass，但 psy 与率控正交、仍然生效
@@ -2301,6 +2312,53 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "-x265-params" || arg == "-x264-params"),
             "psy 全空不应发 params：{args:?}"
+        );
+    }
+
+    #[test]
+    fn ineffective_perception_params_are_not_emitted() {
+        // fast 档：rd=2、rdoq-level=0 → 两个 psy 参数都不生效、不下发（裁定 D2/D4）。
+        let mut fast = sample_config("mp4", "libx265");
+        fast.preset = "fast".to_string();
+        fast.x265_psy_rd = "4".to_string();
+        fast.x265_psy_rdoq = "1".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &fast, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-x265-params"),
+            "fast 档两个 psy 均不生效，不应发 -x265-params：{args:?}"
+        );
+
+        // medium 档：psy-rd 放行，psy-rdoq 仍被压住。
+        let mut medium = sample_config("mp4", "libx265");
+        medium.x265_psy_rd = "4".to_string();
+        medium.x265_psy_rdoq = "1".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &medium, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-x265-params", "psy-rd=4"),
+            "medium 档 psy-rd 应生效且值精确为 psy-rd=4：{args:?}"
+        );
+
+        // x264 faster 档：subme=4<6 → psy-rd 不下发。
+        let mut x264_faster = sample_config("mp4", "libx264");
+        x264_faster.preset = "faster".to_string();
+        x264_faster.x264_psy_rd = "2".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &x264_faster, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-x264-params"),
+            "x264 faster 档 psy-rd 不生效，不应发 -x264-params：{args:?}"
+        );
+    }
+
+    #[test]
+    fn rd_and_rdoq_level_are_emitted_without_psy() {
+        // rd／rdoq-level 独立旋钮：只填它们也要下发（不以 psy 为前提）。
+        let mut config = sample_config("mp4", "libx265");
+        config.x265_rd_level = "5".to_string();
+        config.x265_rdoq_level = "1".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &config, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-x265-params", "rd=5:rdoq-level=1"),
+            "rd／rdoq-level 独立键应下发：{args:?}"
         );
     }
 

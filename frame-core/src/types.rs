@@ -386,16 +386,26 @@ pub struct ConversionConfig {
     /// 仅 libx265 + 两遍编码 + 目标码率档生效。默认关闭。
     #[serde(default)]
     pub x265_multipass_opt_distortion: bool,
-    /// x264 心理视觉强度（`psy-rd`）。空串＝不发，跟随编码器默认（1.0）。范围 0..=10。
+    /// x264 心理视觉强度（`psy-rd`）。空串＝不发，跟随编码器默认（1.0）；
+    /// subme<6 的档位不下发。范围 0..=10。
     #[serde(default)]
     pub x264_psy_rd: String,
-    /// x265 心理视觉强度（`psy-rd`）。空串＝不发，跟随编码器默认（2.0）。范围 0..=5。
+    /// x265 心理视觉强度（`psy-rd`）。空串＝不发，跟随编码器默认（2.0）；
+    /// 仅在有效 rd ≥3 时下发。范围 0..=5。
     #[serde(default)]
     pub x265_psy_rd: String,
-    /// x265 畸变精炼（`psy-rdoq`）。空串＝不发；非空且 >0 时自动携带 `rdoq-level=2`。
-    /// 范围 0..=60。默认 0 ＝编码器默认（medium 档 rdoq 关闭，该参数无效）。
+    /// x265 畸变精炼（`psy-rdoq`）。空串＝不发；仅在有效 rdoq-level ≥1 时下发。
+    /// 范围 0..=50（官方硬限）。
     #[serde(default)]
     pub x265_psy_rdoq: String,
+    /// x265 率失真深度（`rd`）。空串＝不发，跟随预设默认（见
+    /// [`crate::psy::x265_preset_rdo_defaults`]）。范围 1..=6。
+    #[serde(default)]
+    pub x265_rd_level: String,
+    /// x265 畸变精炼深度（`rdoq-level`）。空串＝不发，跟随预设默认
+    /// （见 [`crate::psy::x265_preset_rdo_defaults`]）。范围 0..=2。
+    #[serde(default)]
+    pub x265_rdoq_level: String,
     /// H.264 软件编码兼容性 profile：`baseline`／`main`／`high`。空串＝跟随默认
     /// （x264 自动选 high）。10-bit 档案不暴露（像素格式自动决定）。
     #[serde(default)]

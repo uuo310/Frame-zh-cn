@@ -138,6 +138,7 @@ use crate::{
         apply_video_two_pass, apply_video_vbv_enabled, apply_x264_psy_rd,
         apply_x265_multipass_opt_analysis,
         apply_x265_multipass_opt_distortion, apply_x265_psy_rd, apply_x265_psy_rdoq,
+        apply_x265_rd_level, apply_x265_rdoq_level,
         apply_prores_profile,
         apply_videotoolbox_allow_sw, audio_channel_options, audio_codec_options,
         audio_codec_supports_vbr, audio_quality_range, audio_track_options, create_custom_preset,
@@ -919,6 +920,8 @@ struct SettingsRenderState<'a> {
     video_x264_psy_rd_focus: Option<&'a FocusHandle>,
     video_x265_psy_rd_focus: Option<&'a FocusHandle>,
     video_x265_psy_rdoq_focus: Option<&'a FocusHandle>,
+    video_x265_rd_level_focus: Option<&'a FocusHandle>,
+    video_x265_rdoq_level_focus: Option<&'a FocusHandle>,
     gif_loop_focus: Option<&'a FocusHandle>,
     video_pixel_format_select: SettingsVideoSelectUi<'a>,
     video_codec_select: SettingsVideoSelectUi<'a>,
@@ -967,6 +970,8 @@ struct SettingsVideoInputFocuses<'a> {
     x264_psy_rd: Option<&'a FocusHandle>,
     x265_psy_rd: Option<&'a FocusHandle>,
     x265_psy_rdoq: Option<&'a FocusHandle>,
+    x265_rd_level: Option<&'a FocusHandle>,
+    x265_rdoq_level: Option<&'a FocusHandle>,
     gif_loop: Option<&'a FocusHandle>,
 }
 

@@ -2618,9 +2618,16 @@ mod psy {
         assert!(apply_x265_psy_rdoq(&mut x265, "12.5"));
         assert_eq!(x265.x265_psy_rdoq, "12.5");
 
+        // 上限 50 为官方硬限：50 接受、51 拒（2026-10 修正；原上限 60 会让编码器打开失败）
+        assert!(apply_x265_psy_rdoq(&mut x265, "50"));
+        assert_eq!(x265.x265_psy_rdoq, "50");
+        assert!(
+            !apply_x265_psy_rdoq(&mut x265, "51"),
+            "x265 psy-rdoq 上限 50"
+        );
+
         // 越界拒收
         assert!(!apply_x265_psy_rd(&mut x265, "5.1"));
-        assert!(!apply_x265_psy_rdoq(&mut x265, "61"));
 
         // 非数字拒收
         assert!(!apply_x265_psy_rdoq(&mut x265, "abc"));
@@ -2641,6 +2648,49 @@ mod psy {
     }
 
     #[test]
+    fn rd_level_and_rdoq_level_validate_integer_ranges() {
+        let mut x265 = ConversionConfig {
+            video_codec: "libx265".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        // 合法值接受（含边界）
+        assert!(apply_x265_rd_level(&mut x265, "1"));
+        assert_eq!(x265.x265_rd_level, "1");
+        assert!(apply_x265_rd_level(&mut x265, "6"));
+        assert_eq!(x265.x265_rd_level, "6");
+        assert!(apply_x265_rdoq_level(&mut x265, "0"));
+        assert_eq!(x265.x265_rdoq_level, "0");
+        assert!(apply_x265_rdoq_level(&mut x265, "2"));
+        assert_eq!(x265.x265_rdoq_level, "2");
+
+        // 前导零按整数规范化
+        assert!(apply_x265_rd_level(&mut x265, "03"));
+        assert_eq!(x265.x265_rd_level, "3");
+
+        // 越界拒收：rd 0/7（官方 1..=6）；rdoq-level 3（官方 0..=2）
+        assert!(!apply_x265_rd_level(&mut x265, "0"));
+        assert!(!apply_x265_rd_level(&mut x265, "7"));
+        assert!(!apply_x265_rdoq_level(&mut x265, "3"));
+
+        // 非整数拒收
+        assert!(!apply_x265_rd_level(&mut x265, "2.5"));
+        assert!(!apply_x265_rdoq_level(&mut x265, "abc"));
+
+        // 空串＝清除
+        assert!(apply_x265_rd_level(&mut x265, " "));
+        assert_eq!(x265.x265_rd_level, "");
+
+        // 编码器门控：x265 字段只在 libx265 下可改
+        let mut x264 = ConversionConfig {
+            video_codec: "libx264".to_string(),
+            ..ConversionConfig::default()
+        };
+        assert!(!apply_x265_rd_level(&mut x264, "5"));
+        assert!(!apply_x265_rdoq_level(&mut x264, "2"));
+    }
+
+    #[test]
     fn switching_codec_clears_the_psy_fields() {
         let mut x265 = ConversionConfig {
             video_codec: "libx265".to_string(),
@@ -2648,10 +2698,14 @@ mod psy {
         };
         x265.x265_psy_rd = "3".to_string();
         x265.x265_psy_rdoq = "10".to_string();
+        x265.x265_rd_level = "5".to_string();
+        x265.x265_rdoq_level = "1".to_string();
 
         assert!(apply_video_codec(&mut x265, "libx264"));
         assert_eq!(x265.x265_psy_rd, "");
         assert_eq!(x265.x265_psy_rdoq, "");
+        assert_eq!(x265.x265_rd_level, "");
+        assert_eq!(x265.x265_rdoq_level, "");
 
         let mut x264 = ConversionConfig {
             video_codec: "libx264".to_string(),

@@ -147,6 +147,14 @@ impl FrameRoot {
                 .file_queue
                 .selected_file()
                 .map_or_else(String::new, |file| file.config.x265_psy_rdoq.clone()),
+            FrameTextInputKind::VideoX265RdLevel => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.x265_rd_level.clone()),
+            FrameTextInputKind::VideoX265RdoqLevel => self
+                .file_queue
+                .selected_file()
+                .map_or_else(String::new, |file| file.config.x265_rdoq_level.clone()),
             FrameTextInputKind::GifLoop => self
                 .file_queue
                 .selected_file()
@@ -320,6 +328,26 @@ impl FrameRoot {
                 let next = sanitize_decimal_input(candidate);
                 self.file_queue.selected_file_mut().map(|file| {
                     apply_x265_psy_rdoq(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoX265RdLevel => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_decimal_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_x265_rd_level(&mut file.config, &next);
+                })?;
+                Some(next)
+            }
+            FrameTextInputKind::VideoX265RdoqLevel => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_decimal_input(candidate);
+                self.file_queue.selected_file_mut().map(|file| {
+                    apply_x265_rdoq_level(&mut file.config, &next);
                 })?;
                 Some(next)
             }

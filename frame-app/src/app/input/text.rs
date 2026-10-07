@@ -31,7 +31,9 @@ pub(super) fn sanitize_replacement_text(kind: FrameTextInputKind, value: &str) -
         | FrameTextInputKind::GifLoop => sanitize_number_input(value),
         FrameTextInputKind::VideoX264PsyRd
         | FrameTextInputKind::VideoX265PsyRd
-        | FrameTextInputKind::VideoX265PsyRdoq => sanitize_decimal_input(value),
+        | FrameTextInputKind::VideoX265PsyRdoq
+        | FrameTextInputKind::VideoX265RdLevel
+        | FrameTextInputKind::VideoX265RdoqLevel => sanitize_decimal_input(value),
         FrameTextInputKind::PreviewStartTime | FrameTextInputKind::PreviewEndTime => {
             sanitize_number_input(value)
         }

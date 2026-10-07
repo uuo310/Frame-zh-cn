@@ -643,7 +643,11 @@ pub fn apply_x265_multipass_opt_distortion(config: &mut ConversionConfig, enable
 
 const X264_PSY_RD_MAX: f32 = 10.0;
 const X265_PSY_RD_MAX: f32 = 5.0;
-const X265_PSY_RDOQ_MAX: f32 = 60.0;
+const X265_PSY_RDOQ_MAX: f32 = 50.0;
+/// x265 `rd`（1..=6）与 `rdoq-level`（0..=2）为整数参数。
+const X265_RD_LEVEL_MIN: u8 = 1;
+const X265_RD_LEVEL_MAX: u8 = 6;
+const X265_RDOQ_LEVEL_MAX: u8 = 2;
 
 /// psy 数值清洗：空串＝清除（跟随编码器默认）；非数字或越界＝拒收（None）。
 fn sanitized_psy_value(value: &str, max: f32) -> Option<String> {
@@ -681,7 +685,7 @@ pub fn apply_x265_psy_rd(config: &mut ConversionConfig, value: &str) -> bool {
     true
 }
 
-/// x265 畸变精炼（psy-rdoq，0..=60）。空＝清除；>0 时参数层自动携带 rdoq-level=2。
+/// x265 畸变精炼（psy-rdoq，0..=50）。空＝清除；仅在有效 rdoq-level ≥1 时下发。
 pub fn apply_x265_psy_rdoq(config: &mut ConversionConfig, value: &str) -> bool {
     let Some(next) = sanitized_psy_value(value, X265_PSY_RDOQ_MAX) else {
         return false;
@@ -691,6 +695,42 @@ pub fn apply_x265_psy_rdoq(config: &mut ConversionConfig, value: &str) -> bool {
     }
 
     config.x265_psy_rdoq = next;
+    true
+}
+
+/// 整数型参数清洗：空串＝清除（跟随预设默认）；非整数或越界＝拒收（None）。
+fn sanitized_int_value(value: &str, min: u8, max: u8) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Some(String::new());
+    }
+    let parsed: u8 = trimmed.parse().ok()?;
+    (min..=max).contains(&parsed).then(|| parsed.to_string())
+}
+
+/// x265 率失真深度（rd，1..=6）。空＝清除（跟随预设默认）。
+pub fn apply_x265_rd_level(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = sanitized_int_value(value, X265_RD_LEVEL_MIN, X265_RD_LEVEL_MAX) else {
+        return false;
+    };
+    if config.video_codec != "libx265" || config.x265_rd_level == next {
+        return false;
+    }
+
+    config.x265_rd_level = next;
+    true
+}
+
+/// x265 畸变精炼深度（rdoq-level，0..=2）。空＝清除（跟随预设默认）。
+pub fn apply_x265_rdoq_level(config: &mut ConversionConfig, value: &str) -> bool {
+    let Some(next) = sanitized_int_value(value, 0, X265_RDOQ_LEVEL_MAX) else {
+        return false;
+    };
+    if config.video_codec != "libx265" || config.x265_rdoq_level == next {
+        return false;
+    }
+
+    config.x265_rdoq_level = next;
     true
 }
 
@@ -1291,6 +1331,8 @@ pub fn normalize_video_config(
     if config.video_codec != "libx265" {
         config.x265_psy_rd.clear();
         config.x265_psy_rdoq.clear();
+        config.x265_rd_level.clear();
+        config.x265_rdoq_level.clear();
     }
     // 编码兼容性 / ProRes 档位同理：切走即清；与像素格式冲突时也回落。
     if config.video_codec != "libx264" {

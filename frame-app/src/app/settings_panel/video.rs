@@ -1,6 +1,7 @@
 use super::*;
 use crate::capabilities::hw_decode_backend;
 use crate::numeric::u32_to_u8;
+use frame_core::psy;
 use frame_core::types::HwDecodeBackend;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -883,6 +884,8 @@ fn settings_video_perception_section(
     let mut section = settings_video_section("感知优化", palette);
     match config.video_codec.as_str() {
         "libx264" => {
+            // subme<6 的档位（ultrafast~faster）psy-rd 不生效：灰置不可选（保留已填值）。
+            let psy_rd_disabled = settings_disabled || !psy::x264_psy_rd_effective(&config.preset);
             section = section
                 .child(settings_video_group_label(
                     "心理视觉优化",
@@ -900,7 +903,7 @@ fn settings_video_perception_section(
                                 id: "settings-video-x264-psy-rd-field",
                                 value: &config.x264_psy_rd,
                                 placeholder: "1.0（跟随默认）",
-                                disabled: settings_disabled,
+                                disabled: psy_rd_disabled,
                                 focus: focuses.x264_psy_rd,
                                 kind: FrameTextInputKind::VideoX264PsyRd,
                             },
@@ -911,6 +914,18 @@ fn settings_video_perception_section(
                 );
         }
         "libx265" => {
+            // 有效值口径（裁定 D2）：用户值 ?? 预设默认；不生效即灰置、保留已填值（D4）。
+            let rdo_defaults = psy::x265_preset_rdo_defaults(&config.preset);
+            let psy_rd_disabled = settings_disabled
+                || !psy::x265_psy_rd_effective(&config.x265_rd_level, &config.preset);
+            let psy_rdoq_disabled = settings_disabled
+                || !psy::x265_psy_rdoq_effective(&config.x265_rdoq_level, &config.preset);
+            let psy_rdoq_placeholder = format!(
+                "{}（跟随默认）",
+                psy::x265_preset_psy_rdoq_default(&config.preset)
+            );
+            let rd_level_placeholder = format!("{}（跟随默认）", rdo_defaults.rd);
+            let rdoq_level_placeholder = format!("{}（跟随默认）", rdo_defaults.rdoq_level);
             section = section
                 .child(settings_video_group_label(
                     "心理视觉优化",
@@ -928,7 +943,7 @@ fn settings_video_perception_section(
                                 id: "settings-video-x265-psy-rd-field",
                                 value: &config.x265_psy_rd,
                                 placeholder: "2.0（跟随默认）",
-                                disabled: settings_disabled,
+                                disabled: psy_rd_disabled,
                                 focus: focuses.x265_psy_rd,
                                 kind: FrameTextInputKind::VideoX265PsyRd,
                             },
@@ -937,14 +952,42 @@ fn settings_video_perception_section(
                             cx,
                         ))
                         .child(settings_video_psy_column(
-                            "量化 psy-rdoq（0–60）",
+                            "量化 psy-rdoq（0–50）",
                             FrameTextInputSpec {
                                 id: "settings-video-x265-psy-rdoq-field",
                                 value: &config.x265_psy_rdoq,
-                                placeholder: "0（跟随默认）",
-                                disabled: settings_disabled,
+                                placeholder: &psy_rdoq_placeholder,
+                                disabled: psy_rdoq_disabled,
                                 focus: focuses.x265_psy_rdoq,
                                 kind: FrameTextInputKind::VideoX265PsyRdoq,
+                            },
+                            palette,
+                            window,
+                            cx,
+                        ))
+                        .child(settings_video_psy_column(
+                            "RDO 深度 rdLevel（1–6）",
+                            FrameTextInputSpec {
+                                id: "settings-video-x265-rd-level-field",
+                                value: &config.x265_rd_level,
+                                placeholder: &rd_level_placeholder,
+                                disabled: settings_disabled,
+                                focus: focuses.x265_rd_level,
+                                kind: FrameTextInputKind::VideoX265RdLevel,
+                            },
+                            palette,
+                            window,
+                            cx,
+                        ))
+                        .child(settings_video_psy_column(
+                            "RDOQ 级别 rdoq-level（0–2）",
+                            FrameTextInputSpec {
+                                id: "settings-video-x265-rdoq-level-field",
+                                value: &config.x265_rdoq_level,
+                                placeholder: &rdoq_level_placeholder,
+                                disabled: settings_disabled,
+                                focus: focuses.x265_rdoq_level,
+                                kind: FrameTextInputKind::VideoX265RdoqLevel,
                             },
                             palette,
                             window,
