@@ -914,7 +914,8 @@ fn settings_video_perception_section(
                 );
         }
         "libx265" => {
-            // 有效值口径（裁定 D2）：用户值 ?? 预设默认；不生效即灰置、保留已填值（D4）。
+            // 双闸门口径（2026-10 B1 修复）：档位默认支持 ∧ 有效值支持；
+            // 不生效即灰置、保留已填值（D4）。判定与下发同源（frame-core::psy）。
             let rdo_defaults = psy::x265_preset_rdo_defaults(&config.preset);
             let psy_rd_disabled = settings_disabled
                 || !psy::x265_psy_rd_effective(&config.x265_rd_level, &config.preset);

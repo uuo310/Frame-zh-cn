@@ -83,6 +83,11 @@ impl Element for FrameTextInputElement {
         } else {
             selected_range.end
         };
+        // 「先聚焦、后变灰」（如切换 preset 档位）时焦点可能仍驻留：主动清掉。
+        // 之后每帧渲染的 reconcile_text_input_focus 会随之停掉光标计时。
+        if self.disabled && self.focus_handle.is_focused(window) {
+            window.blur();
+        }
         let focused = self.focus_handle.is_focused(window);
         let is_placeholder = content.is_empty();
         let display_text: SharedString = if is_placeholder {
@@ -115,8 +120,10 @@ impl Element for FrameTextInputElement {
             .shape_line(display_text, font_size, &[run], None);
         let metrics = frame_text_input_metrics(root);
         let text_top = bounds.top() + (bounds.size.height - px(metrics.caret_height)) / 2.0;
-        let should_reveal_cursor =
-            focused && root.text_input_ui.active == Some(self.kind) && !is_placeholder;
+        let should_reveal_cursor = focused
+            && !self.disabled
+            && root.text_input_ui.active == Some(self.kind)
+            && !is_placeholder;
         let cursor_x = line.x_for_index(cursor_offset);
         let scroll_x = if is_placeholder {
             Pixels::ZERO
@@ -132,6 +139,7 @@ impl Element for FrameTextInputElement {
             clamp_text_input_scroll_x(runtime.scroll_x, line.width(), bounds.size.width)
         };
         let show_cursor = focused
+            && !self.disabled
             && root.text_input_ui.active == Some(self.kind)
             && root.text_input_ui.cursor_visible
             && window.is_window_active()
@@ -146,7 +154,7 @@ impl Element for FrameTextInputElement {
                 color(self.palette.text_primary),
             )
         });
-        let selection = (!selected_range.is_empty()).then(|| {
+        let selection = (!self.disabled && !selected_range.is_empty()).then(|| {
             fill(
                 Bounds::from_corners(
                     point(
@@ -182,10 +190,11 @@ impl Element for FrameTextInputElement {
         cx: &mut App,
     ) {
         let focused = self.focus_handle.is_focused(window);
+        let disabled = self.disabled;
         let kind = self.kind;
         let active = self.owner.read(cx).text_input_ui.active == Some(kind);
 
-        if should_handle_text_input(self.disabled, focused, active) {
+        if should_handle_text_input(disabled, focused, active) {
             window.handle_input(
                 &self.focus_handle,
                 ElementInputHandler::new(bounds, self.owner.clone()),
@@ -194,7 +203,7 @@ impl Element for FrameTextInputElement {
         }
 
         self.owner.update(cx, |root, cx| {
-            if focused && root.text_input_ui.active != Some(kind) {
+            if !disabled && focused && root.text_input_ui.active != Some(kind) {
                 root.activate_text_input(kind, cx);
             }
         });
@@ -248,6 +257,11 @@ const METADATA_HINT_TEXT_SIZE_PX: f32 = 11.0;
 /// 提示型占位（psy 的「默认值（跟随默认）」）在常规占位灰度上的再降档系数。单行常数逐轮微调。
 const PLACEHOLDER_HINT_ALPHA_FACTOR: f32 = 0.72;
 
+/// 禁用（灰置）态输入框整体透明度。单行常数逐轮微调。
+/// 2026-10 三次微调：0.5 → 0.38（加深）→ 0.55（底色/阴影撤除后此值实际只作用于
+/// 文字，回抬以保证「保留值」的可读性）。
+const DISABLED_INPUT_OPACITY: f32 = 0.55;
+
 #[expect(
     clippy::too_many_lines,
     reason = "The GPUI text input element keeps interaction handlers in one builder for predictable focus behavior."
@@ -295,7 +309,8 @@ pub(in crate::app) fn frame_text_input(
         .items_center()
         .min_w_0()
         .rounded(theme::ui_rem(theme::RADIUS_SM))
-        .bg(color(palette.canvas))
+        // 禁用（灰置）态不画底色：直接融入所在容器背景（「跟背景一色」，2026-10 裁定）。
+        .when(!disabled, |this| this.bg(color(palette.canvas)))
         .px(theme::ui_rem(10.0))
         .text_size(theme::ui_rem(if metadata_hint {
             METADATA_HINT_TEXT_SIZE_PX
@@ -303,8 +318,15 @@ pub(in crate::app) fn frame_text_input(
             theme::TEXT_UI_BASE_SIZE
         }))
         .text_color(label_color)
-        .opacity(if disabled { 0.5 } else { 1.0 })
-        .shadow(input_highlight_shadows(palette))
+        .opacity(if disabled {
+            DISABLED_INPUT_OPACITY
+        } else {
+            1.0
+        })
+        // 同底色：禁用（灰置）态一并撤除立体阴影，框体完全消失。
+        .when(!disabled, |this| {
+            this.shadow(input_highlight_shadows(palette))
+        })
         .key_context(if kind.is_preview_timecode() {
             FRAME_TIMECODE_TEXT_INPUT_CONTEXT
         } else {
@@ -369,11 +391,29 @@ pub(in crate::app) fn frame_text_input(
                         }
                     }),
                 )
+        })
+        .when(disabled, |this| {
+            // 禁用（灰置）态点击的显式拦截：阻断冒泡（与可编辑态行为一致，点击不波及
+            // 父级/背景），并用 prevent_default 抑制 GPUI「按下即聚焦」的默认行为——
+            // 即便该分支日后重新 track_focus，光标也不会进入灰置框。
+            this.on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|_root, _event: &MouseDownEvent, window, cx| {
+                    cx.stop_propagation();
+                    window.prevent_default();
+                }),
+            )
         });
 
     if let Some(focus) = focus {
         let focus = focus.clone().tab_stop(!disabled);
-        field = field.track_focus(&focus).child(FrameTextInputElement {
+        // 禁用（灰置）态不 track_focus：不注册 GPUI 的「按下即聚焦」，也不暴露
+        // 无障碍 Focus action（禁用元素不可聚焦，语义正确）。子元素仍持有句柄，
+        // 用于判定并清理「先聚焦、后变灰」时残留的焦点（见 prepaint）。
+        if !disabled {
+            field = field.track_focus(&focus);
+        }
+        field = field.child(FrameTextInputElement {
             owner: cx.entity(),
             kind,
             placeholder: SharedString::from(placeholder),

@@ -7,15 +7,17 @@
 //!
 //! 口径：空串＝不发（跟随编码器默认）；非法值（非数字、非整数、越界）在 UI 层被
 //! 拒收，这里再防线一次——解析失败或越界一律静默跳过，绝不让脏值进命令行。
-//! 参数是否实际生效由官方原文规则决定，故是否下发一律按「有效值」判定（裁定 D2）：
-//! - `psy-rd` 仅在 rd ≥3 时有效（官方原文：only has effect on presets which use
-//!   RDO-based mode decisions (--rd 3 and above)）；
-//! - `psy-rdoq` 仅在 rdoq-level ≥1 时有效（官方原文：only has effect when
-//!   --rdoq-level is 1 or 2）；
-//! - x264 `psy-rd` 需要 subme ≥6（官方原文：requires subme>=6）。
+//! 参数是否实际生效由官方原文规则决定；是否下发与界面灰置按「双闸门」判定
+//! （2026-10 B1 修复，取代原 D2 单闸门口径）：
+//! - 闸门一（档位为纲）：该档实测默认值本身支持——`psy-rd` 需默认 rd ≥3，
+//!   `psy-rdoq` 需默认 rdoq-level ≥1；不支持即恒灰，用户覆盖旋钮也不改变。
+//! - 闸门二（有效值闭环）：用户值 ?? 档位默认 ≥ 阈值（`psy-rd` ≥3、`psy-rdoq` ≥1；
+//!   官方原文：only has effect on presets which use RDO-based mode decisions
+//!   (--rd 3 and above) / only has effect when --rdoq-level is 1 or 2）。
+//! - x264 `psy-rd` 需要 subme ≥6（官方原文：requires subme>=6），恒随档位。
 //!
 //! 「有效值」＝用户填的合法值，否则该预设档的实测默认值（见
-//! [`x265_preset_rdo_defaults`]）。不满足有效性时该键不下发，界面值保留并灰显
+//! [`x265_preset_rdo_defaults`]）。不满足闸门时该键不下发，界面值保留并灰显
 //! （裁定 D4）。
 //!
 //! x264 的 `psy=0` 总开关曾随界面撤除：实测它虽与 psy-rd=0:psy-trellis=0 互异，
@@ -127,22 +129,37 @@ pub fn x264_psy_rd_effective(preset: &str) -> bool {
     x264_preset_subme(preset) >= 6
 }
 
-/// x265 `psy-rd` 是否生效：有效 rd ≥3（官方 "rd 3 and above"）。
+/// x265 `psy-rd` 是否生效（双闸门，2026-10 B1 修复）：
+/// 档位默认支持（该档实测默认 rd ≥3）∧ 有效值支持（用户值 ?? 默认 ≥3）。
+/// 低档位（ultrafast~fast，默认 rd=2）无视用户覆盖恒灰——档位为纲，旋钮
+/// 只在本档支持的范围内调整（D1/D4 不变）。
 #[must_use]
 pub fn x265_psy_rd_effective(rd_level: &str, preset: &str) -> bool {
-    let effective = sanitized_int_in_range(rd_level, X265_RD_LEVEL_MIN, X265_RD_LEVEL_MAX)
-        .and_then(|value| value.parse::<u8>().ok())
-        .unwrap_or_else(|| x265_preset_rdo_defaults(preset).rd);
-    effective >= 3
+    let defaults = x265_preset_rdo_defaults(preset);
+    defaults.rd >= 3 && x265_effective_rd_level(rd_level, defaults) >= 3
 }
 
-/// x265 `psy-rdoq` 是否生效：有效 rdoq-level ≥1（官方 "rdoq-level is 1 or 2"）。
+/// x265 `psy-rdoq` 是否生效（双闸门，2026-10 B1 修复）：
+/// 档位默认支持（该档实测默认 rdoq-level ≥1）∧ 有效值支持（用户值 ?? 默认 ≥1）。
+/// ultrafast~medium（默认 rdoq-level=0）无视用户覆盖恒灰。
 #[must_use]
 pub fn x265_psy_rdoq_effective(rdoq_level: &str, preset: &str) -> bool {
-    let effective = sanitized_int_in_range(rdoq_level, 0, X265_RDOQ_LEVEL_MAX)
+    let defaults = x265_preset_rdo_defaults(preset);
+    defaults.rdoq_level >= 1 && x265_effective_rdoq_level(rdoq_level, defaults) >= 1
+}
+
+/// 「有效值」＝用户填的合法整数值，否则回退该档实测默认（裁定 D2/D4）。
+fn x265_effective_rd_level(rd_level: &str, defaults: X265PresetRdoDefaults) -> u8 {
+    sanitized_int_in_range(rd_level, X265_RD_LEVEL_MIN, X265_RD_LEVEL_MAX)
         .and_then(|value| value.parse::<u8>().ok())
-        .unwrap_or_else(|| x265_preset_rdo_defaults(preset).rdoq_level);
-    effective >= 1
+        .unwrap_or(defaults.rd)
+}
+
+/// 同 [`x265_effective_rd_level`]，rdoq-level 口径（0..=2）。
+fn x265_effective_rdoq_level(rdoq_level: &str, defaults: X265PresetRdoDefaults) -> u8 {
+    sanitized_int_in_range(rdoq_level, 0, X265_RDOQ_LEVEL_MAX)
+        .and_then(|value| value.parse::<u8>().ok())
+        .unwrap_or(defaults.rdoq_level)
 }
 
 /// x264 的 `-x264-params` 值：仅发非空的 psy-rd（subme<6 的档位不发）。
@@ -267,16 +284,21 @@ mod tests {
 
     #[test]
     fn psy_rd_depends_on_effective_rd() {
-        // fast 档默认 rd=2：psy-rd 不发。
+        // 闸门一（档位为纲，B1 修复）：fast 档默认 rd=2——即使用户把 rdLevel 拉到 5，
+        // psy-rd 也恒灰不发（rd 旋钮键照发）。
         assert!(x265_perception_keys("libx265", "fast", "", "", "4", "").is_none());
-        // medium 档默认 rd=3：发。
+        assert_eq!(
+            x265_perception_keys("libx265", "fast", "5", "", "4", "").as_deref(),
+            Some("rd=5")
+        );
+        // medium 档默认 rd=3（档位支持）：闸门二按有效值——缺省即发。
         assert_eq!(
             x265_perception_keys("libx265", "medium", "", "", "4", "").as_deref(),
             Some("psy-rd=4")
         );
-        // 用户覆盖 rd：fast 档填 rdLevel=5 后 psy-rd 生效（闭环）。
+        // medium 档用户把 rdLevel 覆盖为 5：有效值支持（旋钮在本档支持范围内），发。
         assert_eq!(
-            x265_perception_keys("libx265", "fast", "5", "", "4", "").as_deref(),
+            x265_perception_keys("libx265", "medium", "5", "", "4", "").as_deref(),
             Some("rd=5:psy-rd=4")
         );
         // 用户把 medium 档 rdLevel 调低到 2：psy-rd 反被压住。
@@ -288,23 +310,50 @@ mod tests {
 
     #[test]
     fn psy_rdoq_depends_on_effective_rdoq_level() {
-        // medium 档默认 rdoq-level=0：psy-rdoq 不发。
+        // 闸门一（档位为纲，B1 修复）：medium 档默认 rdoq-level=0——用户把旋钮
+        // 填成 2 也不解灰（rdoq-level 键照发，psy-rdoq 恒不发）。
         assert!(x265_perception_keys("libx265", "medium", "", "", "", "1.5").is_none());
-        // slow 档默认 rdoq-level=2：发。
+        assert_eq!(
+            x265_perception_keys("libx265", "medium", "", "2", "", "1.5").as_deref(),
+            Some("rdoq-level=2")
+        );
+        // slow 档默认 rdoq-level=2（档位支持）：闸门二按有效值——缺省即发。
         assert_eq!(
             x265_perception_keys("libx265", "slow", "", "", "", "1.5").as_deref(),
             Some("psy-rdoq=1.5")
         );
-        // 用户覆盖 rdoq-level：medium 档填 2 后 psy-rdoq 生效（闭环，裁定 D2）。
-        assert_eq!(
-            x265_perception_keys("libx265", "medium", "", "2", "", "1.5").as_deref(),
-            Some("rdoq-level=2:psy-rdoq=1.5")
-        );
-        // 用户显式 rdoq-level=0：键发出，但 psy-rdoq 不下发。
+        // 用户显式 rdoq-level=0：键发出，但 psy-rdoq 不下发（有效值 <1）。
         assert_eq!(
             x265_perception_keys("libx265", "slow", "", "0", "", "1.5").as_deref(),
             Some("rdoq-level=0")
         );
+    }
+
+    #[test]
+    fn low_presets_keep_psy_keys_pinned_off() {
+        // B1 修复回归锁（2026-10）：ultrafast~fast（默认 rd=2/rdoq=0）的 psy 两键
+        // 恒灰——用户把两个旋钮都拉满、psy 值填好，psy 键也不得下发；旋钮键照发。
+        for preset in ["ultrafast", "superfast", "veryfast", "faster", "fast"] {
+            assert!(!x265_psy_rd_effective("5", preset), "{preset} psy-rd");
+            assert!(!x265_psy_rdoq_effective("2", preset), "{preset} psy-rdoq");
+            assert_eq!(
+                x265_perception_keys("libx265", preset, "5", "2", "4.5", "10").as_deref(),
+                Some("rd=5:rdoq-level=2"),
+                "{preset}"
+            );
+        }
+        // medium：psy-rd 可用（默认 rd=3，档位支持）、psy-rdoq 恒灰。
+        assert!(x265_psy_rd_effective("", "medium"));
+        assert!(!x265_psy_rdoq_effective("2", "medium"));
+        assert_eq!(
+            x265_perception_keys("libx265", "medium", "", "2", "4", "1.5").as_deref(),
+            Some("rdoq-level=2:psy-rd=4")
+        );
+        // slow 及以上：档位支持（闸门一通过），缺省值即有效（闸门二通过）。
+        for preset in ["slow", "slower", "veryslow"] {
+            assert!(x265_psy_rd_effective("", preset), "{preset} psy-rd");
+            assert!(x265_psy_rdoq_effective("", preset), "{preset} psy-rdoq");
+        }
     }
 
     #[test]
