@@ -4857,9 +4857,17 @@ impl Window {
 
         if cx.has_active_drag() {
             if event.is::<MouseMoveEvent>() {
-                // If this was a mouse move event, redraw the window so that the
-                // active drag can follow the mouse cursor.
-                self.refresh();
+                // External file drags don't need per-move redraws: the platform
+                // draws the drag image itself and `ExternalPaths` renders empty,
+                // so a refresh here only churns the renderer. Internal drags
+                // still refresh so the active drag can follow the cursor.
+                let external = cx
+                    .active_drag
+                    .as_ref()
+                    .is_some_and(|drag| drag.value.as_ref().is::<crate::ExternalPaths>());
+                if !external {
+                    self.refresh();
+                }
             } else if event.is::<MouseUpEvent>() {
                 // If this was a mouse up event, cancel the active drag and redraw
                 // the window.
