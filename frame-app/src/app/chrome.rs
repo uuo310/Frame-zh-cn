@@ -18,7 +18,7 @@ use super::primitives::{
 };
 use super::settings_panel::{settings_field_label, settings_hint_text, settings_section};
 use super::{
-    ActiveView, AppearancePopover, AppearanceSettings, ClickEvent, ColorTheme, Context,
+    ActiveView, AppearancePopover, AppearanceSettings, ClickEvent, ColorTheme, Context, Duration,
     ExternalPaths, FILE_LIST_ACTION_ICON_SIZE, FRAME_APP_VERSION, FluentBuilder, FocusHandle,
     FrameAppState, FrameRoot, FrameTextInputKind, INTERACTION_MOTION_DURATION, InteractiveElement,
     IntoElement, LEFT_COLUMN_SPAN, MouseButton, PANEL_HEADER_HEIGHT, ParentElement, PopoverState,
@@ -2170,11 +2170,13 @@ pub(super) fn drag_drop_overlay(
     window: &mut Window,
     cx: &mut Context<FrameRoot>,
 ) -> impl IntoElement {
+    // Instant open/close: each in-flight transition frame re-runs the
+    // full-window backdrop blur, and fast drags cross the edge repeatedly.
     let transition = window
         .use_keyed_transition(
             "drag-drop-overlay-motion",
             cx,
-            SURFACE_MOTION_DURATION,
+            Duration::ZERO,
             |_window, _cx| 0.0_f32,
         )
         .with_easing(ease_in_out);
@@ -2198,7 +2200,8 @@ pub(super) fn drag_drop_overlay(
         .justify_center()
         .p_4()
         .bg(color(palette.canvas.with_alpha(0.60 * progress)))
-        .backdrop_blur(theme::ui_rem(4.0 * progress).to_pixels(window.rem_size()))
+        // Squared falloff: keeps in-flight re-blur cost low; final radius (4.0) unchanged.
+        .backdrop_blur(theme::ui_rem(4.0 * progress * progress).to_pixels(window.rem_size()))
         .opacity(progress)
         .occlude()
         .on_drop(cx.listener(|root, paths: &ExternalPaths, _window, cx| {
