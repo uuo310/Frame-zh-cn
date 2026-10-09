@@ -21,7 +21,7 @@ use super::preview_panel::{
     timeline_slider_percent_from_bounds,
 };
 use super::primitives::frame_highlight_px;
-use super::settings_panel::{hex_to_subtitle_hsv, subtitle_hsv_to_hex};
+use super::settings_panel::{VideoSelectId, hex_to_subtitle_hsv, subtitle_hsv_to_hex};
 use super::*;
 use crate::app_persistence::{AppPersistence, AppSettings};
 use crate::notifications::{AppNotifier, ConversionNotificationSummary};
@@ -272,6 +272,49 @@ mod frame_root_conversion {
         assert_eq!(root.file_queue.selected_file_id(), Some("first"));
         assert_eq!(root.file_queue.files().len(), 2);
         assert_eq!(root.file_queue.files()[0].status, FileStatus::Completed);
+    }
+
+    #[test]
+    fn selecting_another_file_resets_hdr_view_defaults() {
+        let mut root = FrameRoot::new();
+        root.file_queue
+            .add_file(FileItem::from_path("first", "/tmp/one.mp4", 1));
+        root.file_queue
+            .add_file(FileItem::from_path("second", "/tmp/two.mp4", 1));
+
+        // 语境 A：手动收起色彩管理、展开「高级」。
+        root.settings_ui.hdr_section_expanded = false;
+        root.settings_ui.hdr_advanced_expanded = true;
+
+        // 重选当前文件不算语境变更：视图态保持。
+        assert!(root.select_workspace_file("first"));
+        assert!(!root.settings_ui.hdr_section_expanded);
+        assert!(root.settings_ui.hdr_advanced_expanded);
+
+        // 换文件：色彩管理回展开、「高级」回折叠——收起不跨文件粘滞。
+        assert!(root.select_workspace_file("second"));
+        assert!(root.settings_ui.hdr_section_expanded);
+        assert!(!root.settings_ui.hdr_advanced_expanded);
+
+        // 同一文件内重新收起后再重选自身：仍不算语境变更。
+        root.settings_ui.hdr_section_expanded = false;
+        assert!(root.select_workspace_file("second"));
+        assert!(!root.settings_ui.hdr_section_expanded);
+    }
+
+    #[test]
+    fn source_override_commit_restores_expanded_hdr_section_only() {
+        let mut root = FrameRoot::new();
+        root.file_queue
+            .add_file(FileItem::from_path("first", "/tmp/one.mp4", 1));
+        root.settings_ui.hdr_section_expanded = false;
+        root.settings_ui.hdr_advanced_expanded = true;
+
+        // 「覆盖救回」：翻转进 HDR 系时保展开，避免整块以残留收起态收成一行。
+        assert!(root.commit_video_select(VideoSelectId::SourceOverride, "force_pq"));
+        assert!(root.settings_ui.hdr_section_expanded);
+        // 该路径不重置「高级」——用户可能正在高级子区内操作。
+        assert!(root.settings_ui.hdr_advanced_expanded);
     }
 
     fn root_with_output_directory() -> FrameRoot {
@@ -3087,6 +3130,106 @@ mod frame_root_config {
     }
 
     #[test]
+    fn selected_preview_request_bypasses_hdr_mapping_for_comparison() {
+        let mut root = FrameRoot::new();
+        seed_ready_video(&mut root, "video", "/tmp/one.mp4");
+        root.update_selected_config(|config| {
+            config.hdr_conversion_enabled = true;
+            config.hdr_source_kind = "pq".to_string();
+            true
+        });
+        let metadata_entry = root.selected_source_metadata_entry();
+        let mapped = root
+            .selected_preview_runtime_request(&metadata_entry)
+            .expect("mapped request");
+        assert!(mapped.config.conversion_config.hdr_conversion_enabled);
+
+        // 「原片」对照：副本开关被关，真实配置不动，哈希随之变化。
+        root.preview_ui.hdr_preview_bypass = true;
+        let source = root
+            .selected_preview_runtime_request(&metadata_entry)
+            .expect("source request");
+        assert!(!source.config.conversion_config.hdr_conversion_enabled);
+        assert_ne!(source.key.visual_hash, mapped.key.visual_hash);
+        assert!(
+            root.selected_config()
+                .expect("config")
+                .hdr_conversion_enabled
+        );
+
+        // 同源同尺寸 → 切换走热重建通道而非全量重启。
+        assert!(mapped.key.can_reconfigure_to(&source.key));
+    }
+
+    #[test]
+    fn preview_visual_hash_tracks_hdr_mapping_fields() {
+        let mut root = FrameRoot::new();
+        seed_ready_video(&mut root, "video", "/tmp/one.mp4");
+        let metadata_entry = root.selected_source_metadata_entry();
+        let initial = root
+            .selected_preview_runtime_request(&metadata_entry)
+            .expect("initial request");
+
+        root.update_selected_config(|config| {
+            config.hdr_conversion_enabled = true;
+            config.hdr_source_kind = "pq".to_string();
+            true
+        });
+        let enabled = root
+            .selected_preview_runtime_request(&metadata_entry)
+            .expect("enabled request");
+        assert_ne!(enabled.key.visual_hash, initial.key.visual_hash);
+
+        root.update_selected_config(|config| {
+            config.hdr_tonemap_algorithm = "mobius".to_string();
+            true
+        });
+        let algorithm = root
+            .selected_preview_runtime_request(&metadata_entry)
+            .expect("algorithm request");
+        assert_ne!(algorithm.key.visual_hash, enabled.key.visual_hash);
+
+        root.update_selected_config(|config| {
+            config.hdr_source_peak = Some(1000);
+            true
+        });
+        let peak = root
+            .selected_preview_runtime_request(&metadata_entry)
+            .expect("peak request");
+        assert_ne!(peak.key.visual_hash, algorithm.key.visual_hash);
+    }
+
+    #[test]
+    fn hdr_preview_compare_toggle_and_selection_reset() {
+        let mut root = FrameRoot::new();
+        seed_ready_video(&mut root, "video", "/tmp/one.mp4");
+
+        // 映射未生效 → 无对比意义，切换被拒。
+        assert!(!root.toggle_selected_hdr_preview_compare());
+        assert!(!root.preview_ui.hdr_preview_bypass);
+
+        root.update_selected_config(|config| {
+            config.hdr_conversion_enabled = true;
+            config.hdr_source_kind = "pq".to_string();
+            true
+        });
+        assert!(root.toggle_selected_hdr_preview_compare());
+        assert!(root.preview_ui.hdr_preview_bypass);
+        assert!(root.toggle_selected_hdr_preview_compare());
+        assert!(!root.preview_ui.hdr_preview_bypass);
+
+        // 切换选中文件 → 对比态重置（新文件默认看映射后）。
+        root.preview_ui.hdr_preview_bypass = true;
+        root.sync_preview_hdr_compare_for_selection(Some("another"));
+        assert!(!root.preview_ui.hdr_preview_bypass);
+
+        // 同一文件重复同步不打断用户当前对比态。
+        root.preview_ui.hdr_preview_bypass = true;
+        root.sync_preview_hdr_compare_for_selection(Some("another"));
+        assert!(root.preview_ui.hdr_preview_bypass);
+    }
+
+    #[test]
     fn preview_runtime_dimensions_fall_back_without_canvas_bounds() {
         let dimensions = preview_runtime_dimensions(None, 1.0);
 
@@ -4063,6 +4206,9 @@ mod preview_shell {
         let video_scaling_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let video_fps_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let video_profile_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_tonemap_algorithm_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_source_peak_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
+        let video_source_override_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let audio_codec_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let audio_bitrate_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
         let audio_sample_rate_select_scroll_handle = Box::leak(Box::new(ScrollHandle::new()));
@@ -4083,6 +4229,8 @@ mod preview_shell {
             bitrate_window_popover: PopoverState::Hidden,
             bitrate_analysis: Box::leak(Box::new(BitrateAnalysisEntry::default())),
             settings_disabled: false,
+            hdr_advanced_expanded: false,
+            hdr_section_expanded: true,
             output_name: "",
             output_name_focus: None,
             video_width_focus: None,
@@ -4096,6 +4244,7 @@ mod preview_shell {
             video_x265_rd_level_focus: None,
             video_x265_rdoq_level_focus: None,
             gif_loop_focus: None,
+            video_hdr_source_peak_focus: None,
             video_pixel_format_select: SettingsVideoSelectUi {
                 popover: PopoverState::Hidden,
                 scroll_handle: video_pixel_format_select_scroll_handle,
@@ -4165,6 +4314,39 @@ mod preview_shell {
             video_profile_select: SettingsVideoSelectUi {
                 popover: PopoverState::Hidden,
                 scroll_handle: video_profile_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_tonemap_algorithm_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_tonemap_algorithm_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_source_peak_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_source_peak_select_scroll_handle,
+                anchor_y: None,
+                focuses: SettingsSelectFocuses {
+                    trigger: None,
+                    panel: None,
+                    first_option: None,
+                    last_option: None,
+                },
+            },
+            video_source_override_select: SettingsVideoSelectUi {
+                popover: PopoverState::Hidden,
+                scroll_handle: video_source_override_select_scroll_handle,
                 anchor_y: None,
                 focuses: SettingsSelectFocuses {
                     trigger: None,
@@ -4285,6 +4467,7 @@ mod preview_shell {
             settings: &settings,
             crop: crop_state(),
             overlay: PreviewOverlayRenderState::empty(),
+            hdr_compare_source_active: false,
             canvas: PreviewCanvasRenderState::default(),
             playback: preview_playback_state(PreviewMediaKind::Video, 90.4, None, None),
             presentation: PreviewRenderPresentation::default(),
@@ -4320,6 +4503,7 @@ mod preview_shell {
             settings: &settings,
             crop: crop_state(),
             overlay: PreviewOverlayRenderState::empty(),
+            hdr_compare_source_active: false,
             canvas: PreviewCanvasRenderState::default(),
             playback: preview_playback_state(
                 PreviewMediaKind::Video,
@@ -4354,6 +4538,7 @@ mod preview_shell {
             settings: &settings,
             crop: crop_state(),
             overlay: PreviewOverlayRenderState::empty(),
+            hdr_compare_source_active: false,
             canvas: PreviewCanvasRenderState::default(),
             playback: PreviewPlaybackState::new(false),
             presentation: PreviewRenderPresentation::default(),
@@ -4384,6 +4569,7 @@ mod preview_shell {
             settings: &settings,
             crop: crop_state(),
             overlay: PreviewOverlayRenderState::empty(),
+            hdr_compare_source_active: false,
             canvas: PreviewCanvasRenderState::default(),
             playback: PreviewPlaybackState::new(false),
             presentation: PreviewRenderPresentation::default(),
@@ -4412,6 +4598,7 @@ mod preview_shell {
             settings: &settings,
             crop: crop_state(),
             overlay: PreviewOverlayRenderState::empty(),
+            hdr_compare_source_active: false,
             canvas: PreviewCanvasRenderState::default(),
             playback: PreviewPlaybackState::new(false),
             presentation: PreviewRenderPresentation::default(),
@@ -4421,6 +4608,43 @@ mod preview_shell {
 
         assert_eq!(state.availability.media_kind, PreviewMediaKind::Unknown);
         assert!(state.availability.trim_disabled);
+    }
+
+    #[test]
+    fn hdr_compare_available_follows_the_mapping_switch() {
+        let metadata = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            ..SourceMetadata::default()
+        };
+        let hdr_config = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        let make_state = |config: &ConversionConfig, active: bool| {
+            let settings = settings_state(config, Some(&metadata), MetadataStatus::Ready);
+            preview_shell_state(PreviewShellStateInput {
+                selected_file: None,
+                settings: &settings,
+                crop: crop_state(),
+                overlay: PreviewOverlayRenderState::empty(),
+                hdr_compare_source_active: active,
+                canvas: PreviewCanvasRenderState::default(),
+                playback: PreviewPlaybackState::new(false),
+                presentation: PreviewRenderPresentation::default(),
+                render_image: None,
+                runtime_error: None,
+            })
+        };
+
+        let hdr_state = make_state(&hdr_config, true);
+        assert!(hdr_state.hdr_compare_available);
+        assert!(hdr_state.hdr_compare_source_active);
+
+        let sdr_state = make_state(&ConversionConfig::default(), false);
+        assert!(!sdr_state.hdr_compare_available);
+        assert!(!sdr_state.hdr_compare_source_active);
     }
 
     #[test]

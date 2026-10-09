@@ -1,9 +1,11 @@
 use super::{
+    hdr::effective_pixel_format,
     model::{
         AUDIO_CHANNEL_DEFINITIONS, AUDIO_CODEC_DEFINITIONS, AudioQualityRange, ConversionConfig,
         DEFAULT_AUDIO_BITRATE, DEFAULT_AUDIO_BITRATE_MODE, DEFAULT_AUDIO_CHANNELS,
         DEFAULT_AUDIO_QUALITY, DEFAULT_AUDIO_SAMPLE_RATE, DEFAULT_AUDIO_VOLUME, DEFAULT_FPS,
-        DEFAULT_GIF_DITHER, DEFAULT_IMAGE_JPEG_HUFFMAN, DEFAULT_IMAGE_PNG_PREDICTION,
+        DEFAULT_GIF_DITHER, DEFAULT_HDR_SOURCE_PEAK_NIT, DEFAULT_IMAGE_JPEG_HUFFMAN,
+        DEFAULT_IMAGE_PNG_PREDICTION,
         DEFAULT_IMAGE_TIFF_COMPRESSION, DEFAULT_IMAGE_WEBP_PRESET, DEFAULT_PIXEL_FORMAT,
         DEFAULT_RESOLUTION, DEFAULT_VIDEO_BITRATE_MODE, ExternalSubtitleTrack, FPS_OPTIONS,
         GIF_DITHER_OPTIONS, GIF_FPS_OPTIONS, IMAGE_JPEG_HUFFMAN_OPTIONS,
@@ -553,9 +555,9 @@ pub fn apply_pixel_format(config: &mut ConversionConfig, pixel_format: &str) -> 
         return false;
     }
 
-    config.pixel_format = pixel_format.clone();
+    config.pixel_format = pixel_format;
     // 像素格式是更基础的结构属性：与它冲突的 profile / 档位一并回落（见函数注释）。
-    reconcile_profile_with_pixel_format(config, &pixel_format);
+    reconcile_profile_with_pixel_format(config);
     true
 }
 
@@ -754,12 +756,16 @@ fn apply_profile_value(
 /// H.264 软件编码兼容性 profile：空＝跟随默认（x264 自动 high）。
 ///
 /// 8-bit 档位与 10-bit 像素格式**互斥**（实测 x264 `-profile high` × `yuv420p10le`
-/// 直接硬报错）⇒ 10-bit 像素格式下拒设（此时输出会自动落到 High 10 档案）。
+/// 直接硬报错）⇒ 实际生效的像素格式为 10-bit 时拒设（此时输出会自动落到
+/// High 10 档案）。守卫读 [`effective_pixel_format`]：HDR 生效 + `auto` 时链已落
+/// 10-bit，按 `auto` 字面值判断会放行。
 pub fn apply_x264_profile(config: &mut ConversionConfig, value: &str) -> bool {
     let Some(next) = apply_profile_value(config, value, "libx264", &X264_PROFILE_VALUES) else {
         return false;
     };
-    if !next.is_empty() && frame_core::profile::is_ten_bit_pixel_format(&config.pixel_format) {
+    if !next.is_empty()
+        && frame_core::profile::is_ten_bit_pixel_format(effective_pixel_format(config))
+    {
         return false;
     }
     if config.x264_profile == next {
@@ -810,14 +816,18 @@ pub fn apply_prores_profile(config: &mut ConversionConfig, value: &str) -> bool 
 }
 
 /// 档位与像素格式双向联动：切到不兼容的像素格式时回落档位。
-fn reconcile_profile_with_pixel_format(config: &mut ConversionConfig, pixel_format: &str) {
-    if config.video_codec == "libx264" && frame_core::profile::is_ten_bit_pixel_format(pixel_format)
+///
+/// 判据读 [`effective_pixel_format`]（HDR 生效 + `auto` 时链已落 10-bit），
+/// 而非 `pixel_format` 字面值——否则 `auto` 下守卫失明、档位残留。
+fn reconcile_profile_with_pixel_format(config: &mut ConversionConfig) {
+    let pixel_format = effective_pixel_format(config).to_string();
+    if config.video_codec == "libx264" && frame_core::profile::is_ten_bit_pixel_format(&pixel_format)
     {
         config.x264_profile.clear();
     }
     if config.video_codec == "prores"
         && frame_core::profile::is_prores_4444_tier(&config.prores_profile)
-        && !frame_core::profile::is_four_four_four_pixel_format(pixel_format)
+        && !frame_core::profile::is_four_four_four_pixel_format(&pixel_format)
     {
         config.prores_profile.clear();
     }
@@ -1238,6 +1248,7 @@ pub fn initialize_output_config(
     metadata: Option<&SourceMetadata>,
 ) -> bool {
     let before = config.clone();
+    apply_hdr_source_detection(config, metadata);
     normalize_output_config(config, metadata);
 
     if container_supports_audio(&config.container)
@@ -1248,6 +1259,28 @@ pub fn initialize_output_config(
     }
 
     before != *config
+}
+
+/// 探测结果 → HDR 源类型（`hdr_source_kind`）与转换开关初始态。
+///
+/// PQ（`smpte2084`）与 HLG（`arib-std-b67`）源自动勾选转换；DV（含 DOVI
+/// 配置记录）优先于传输特性判定——Profile 8 的兼容基础层传输特性也是 PQ，
+/// 若按传输特性先行会误落 `pq` 而丢失警告，故 DV 只警告不转换、不勾选；
+/// 其余落 SDR。必须在对配置归一化（`normalize_output_config`）之前写入：
+/// 同一轮归一化内的档位回落（`reconcile_profile_with_pixel_format`）
+/// 经 [`effective_pixel_format`] 读该字段解析生效像素格式，后写则不触发。
+fn apply_hdr_source_detection(config: &mut ConversionConfig, metadata: Option<&SourceMetadata>) {
+    let kind = match metadata {
+        Some(metadata) if metadata.dolby_vision => "dv",
+        Some(metadata) => match metadata.color_transfer.as_deref() {
+            Some("smpte2084") => "pq",
+            Some("arib-std-b67") => "hlg",
+            _ => "sdr",
+        },
+        None => "sdr",
+    };
+    config.hdr_source_kind = kind.to_string();
+    config.hdr_conversion_enabled = matches!(kind, "pq" | "hlg");
 }
 
 pub fn normalize_video_config(
@@ -1301,6 +1334,9 @@ pub fn normalize_video_config(
             first_allowed_video_pixel_format(&config.container, &config.video_codec).to_string();
     }
 
+    // HDR→SDR 的像素格式落点不写回配置：「自动」保持字面值，实际落点由
+    // `frame_core::filters::effective_pixel_format` 在链尾/参数层/展示层统一解析。
+
     if !is_video_preset_allowed(&config.video_codec, &config.preset) {
         config.preset = first_allowed_video_preset(&config.video_codec).to_string();
     }
@@ -1344,8 +1380,7 @@ pub fn normalize_video_config(
     if config.video_codec != "prores" {
         config.prores_profile.clear();
     }
-    let current_pixel_format = config.pixel_format.clone();
-    reconcile_profile_with_pixel_format(config, &current_pixel_format);
+    reconcile_profile_with_pixel_format(config);
     if !is_videotoolbox_video_codec(&config.video_codec) {
         config.videotoolbox_allow_sw = false;
     }
@@ -1360,6 +1395,69 @@ pub fn normalize_video_config(
     }
 
     before != *config
+}
+
+/// 「HDR → SDR 转换」开关提交。开关显示与实际链路共用滤镜层判据
+/// （`hdr_toggle_checked`），可操作前提下「显示态」即 `hdr_conversion_enabled`，
+/// 故 UI 传入 `!config.hdr_conversion_enabled` 即可完成翻转。
+pub fn apply_hdr_conversion(config: &mut ConversionConfig, enabled: bool) -> bool {
+    let changed = config.hdr_conversion_enabled != enabled;
+    config.hdr_conversion_enabled = enabled;
+    changed | normalize_video_config(config, None)
+}
+
+pub fn apply_hdr_tonemap_algorithm(config: &mut ConversionConfig, algorithm: &str) -> bool {
+    if !frame_core::types::HDR_TONEMAP_ALGORITHMS.contains(&algorithm) {
+        return false;
+    }
+    if config.hdr_tonemap_algorithm == algorithm {
+        return false;
+    }
+    config.hdr_tonemap_algorithm = algorithm.to_string();
+    true
+}
+
+/// 源峰值模式提交：`auto` → 清除覆盖（不传 `peak`）；`manual` → 进入手动档，
+/// 沿用现值或落默认峰值（[`DEFAULT_HDR_SOURCE_PEAK_NIT`]）。
+pub fn apply_hdr_source_peak_mode(config: &mut ConversionConfig, mode: &str) -> bool {
+    let next = match mode {
+        "auto" => None,
+        "manual" => Some(config.hdr_source_peak.unwrap_or(DEFAULT_HDR_SOURCE_PEAK_NIT)),
+        _ => return false,
+    };
+    if config.hdr_source_peak == next {
+        return false;
+    }
+    config.hdr_source_peak = next;
+    true
+}
+
+/// 源峰值手动数值提交（nit）：输入防呆 clamp 100–10000；空串 = 回到自动。
+pub fn apply_hdr_source_peak(config: &mut ConversionConfig, value: &str) -> bool {
+    let next = sanitized_optional_number(value)
+        .and_then(|value| value.parse::<u32>().ok())
+        .map(|nit| {
+            nit.clamp(
+                frame_core::types::HDR_PEAK_MIN_NIT,
+                frame_core::types::HDR_PEAK_MAX_NIT,
+            )
+        });
+    if config.hdr_source_peak == next {
+        return false;
+    }
+    config.hdr_source_peak = next;
+    true
+}
+
+/// 源类型覆盖提交（错标源兜底）。切换会改变「源是否按 HDR 处理」的判定，
+/// 故随 `normalize_video_config` 重算像素格式联动。
+pub fn apply_hdr_source_override(config: &mut ConversionConfig, source_override: &str) -> bool {
+    if !frame_core::types::HDR_SOURCE_OVERRIDES.contains(&source_override) {
+        return false;
+    }
+    let changed = config.hdr_source_override != source_override;
+    config.hdr_source_override = source_override.to_string();
+    changed | normalize_video_config(config, None)
 }
 
 fn normalize_audio_encoding_settings(config: &mut ConversionConfig) {

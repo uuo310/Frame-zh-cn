@@ -1,10 +1,12 @@
 use frame_core::{capabilities::AvailableEncoders, media_rules};
 
 use super::{
+    hdr::pixel_format_auto_caption,
     model::{
         AUDIO_CHANNEL_DEFINITIONS, AUDIO_CODEC_DEFINITIONS, AudioBitrateOption, AudioChannelOption,
         AudioCodecOption, AudioSampleRateOption, AudioTrackOption, ConversionConfig, FPS_OPTIONS,
-        GIF_COLOR_OPTIONS, GIF_DITHER_OPTIONS, GIF_FPS_OPTIONS, IMAGE_JPEG_HUFFMAN_OPTIONS,
+        GIF_COLOR_OPTIONS, GIF_DITHER_OPTIONS, GIF_FPS_OPTIONS, HdrSelectOption,
+        IMAGE_JPEG_HUFFMAN_OPTIONS,
         IMAGE_PNG_PREDICTION_OPTIONS, IMAGE_TIFF_COMPRESSION_OPTIONS, IMAGE_WEBP_PRESET_OPTIONS,
         ImageEncodingOption, METADATA_FIELDS, METADATA_MODES, MetadataConfig, MetadataField,
         MetadataFieldOption, MetadataMode, MetadataModeOption, OPTIONAL_AUDIO_CODEC_DEFINITIONS,
@@ -993,8 +995,14 @@ pub fn video_codec_options(
         .collect()
 }
 
+/// 像素格式下拉项：「自动」档的 caption 与触发器后缀同源
+/// （[`pixel_format_auto_caption`]）——落点可推断时显化（HDR 链落点 /
+/// 非 HDR 源探测），不可推断回退「编码器默认」。
 #[must_use]
-pub fn video_pixel_format_options(config: &ConversionConfig) -> Vec<VideoPixelFormatOption> {
+pub fn video_pixel_format_options(
+    config: &ConversionConfig,
+    metadata: Option<&SourceMetadata>,
+) -> Vec<VideoPixelFormatOption> {
     VIDEO_PIXEL_FORMAT_DEFINITIONS
         .iter()
         .map(|definition| {
@@ -1009,12 +1017,94 @@ pub fn video_pixel_format_options(config: &ConversionConfig) -> Vec<VideoPixelFo
                 is_selected: allowed && config.pixel_format.eq_ignore_ascii_case(definition.id),
                 is_disabled: !allowed,
                 caption: if definition.id == "auto" {
-                    "编码器默认"
+                    pixel_format_auto_caption(config, metadata)
+                        .unwrap_or("编码器默认")
+                        .to_string()
                 } else if allowed {
-                    definition.id
+                    definition.id.to_string()
                 } else {
-                    "不兼容的编码"
+                    "不兼容的编码".to_string()
                 },
+            }
+        })
+        .collect()
+}
+
+/// 映射算法下拉（zscale 链 tonemap 全集，顺序 = `HDR_TONEMAP_ALGORITHMS`）。
+#[must_use]
+pub fn hdr_tonemap_algorithm_options(
+    config: &ConversionConfig,
+    disabled: bool,
+) -> Vec<HdrSelectOption> {
+    frame_core::types::HDR_TONEMAP_ALGORITHMS
+        .iter()
+        .copied()
+        .map(|algorithm| HdrSelectOption {
+            id: algorithm,
+            label: tonemap_algorithm_label(algorithm),
+            caption: "",
+            is_selected: config.hdr_tonemap_algorithm == algorithm,
+            is_disabled: disabled,
+        })
+        .collect()
+}
+
+fn tonemap_algorithm_label(algorithm: &str) -> &'static str {
+    match algorithm {
+        "mobius" => "Mobius",
+        "reinhard" => "Reinhard",
+        "clip" => "Clip",
+        "linear" => "Linear",
+        "gamma" => "Gamma",
+        _ => "Hable",
+    }
+}
+
+/// 源峰值下拉：自动 / 手动（手动档在行内出现数值输入框）。
+#[must_use]
+pub fn hdr_source_peak_options(config: &ConversionConfig, disabled: bool) -> Vec<HdrSelectOption> {
+    let manual = config.hdr_source_peak.is_some();
+    vec![
+        HdrSelectOption {
+            id: "auto",
+            label: "自动",
+            caption: "按片源元数据推算",
+            is_selected: !manual,
+            is_disabled: disabled,
+        },
+        HdrSelectOption {
+            id: "manual",
+            label: "手动",
+            caption: "指定片源峰值",
+            is_selected: manual,
+            is_disabled: disabled,
+        },
+    ]
+}
+
+/// 源类型覆盖下拉（错标源兜底）。调用方保持其可操作（除全局禁用外）：
+/// 它是把 SDR/DV 判定翻转为 HDR 的唯一入口。
+#[must_use]
+pub fn hdr_source_override_options(
+    config: &ConversionConfig,
+    disabled: bool,
+) -> Vec<HdrSelectOption> {
+    frame_core::types::HDR_SOURCE_OVERRIDES
+        .iter()
+        .copied()
+        .map(|source_override| {
+            let (label, caption) = match source_override {
+                "force_pq" => ("强制 PQ", "按 HDR10 (PQ) 处理"),
+                "force_hlg" => ("强制 HLG", "按 HLG 处理"),
+                "treat_as_sdr" => ("视为 SDR", "不转换，链路直通"),
+                _ => ("自动", "按探测结果判断"),
+            };
+            HdrSelectOption {
+                id: source_override,
+                label,
+                caption,
+                is_selected: config.hdr_source_override == source_override,
+                is_disabled: disabled,
             }
         })
         .collect()

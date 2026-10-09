@@ -3,7 +3,7 @@ use crate::app::preview_panel::preview_presented_frame;
 use crate::conversion_runner::core_config_from_gpui;
 use crate::numeric::rounded_f64_to_u64;
 use crate::preview_engine::PreviewEngineError;
-use crate::settings::{AudioFiltersConfig, FilterValue, VideoFiltersConfig};
+use crate::settings::{AudioFiltersConfig, FilterValue, VideoFiltersConfig, hdr_toggle_checked};
 use std::{
     collections::hash_map::DefaultHasher,
     hash::{Hash, Hasher},
@@ -22,6 +22,7 @@ impl FrameRoot {
             metadata_entry,
             !self.preview_ui.crop_mode,
             !self.preview_ui.overlay.overlay_mode(),
+            self.preview_ui.hdr_preview_bypass,
             preview_dimensions,
         )
     }
@@ -600,13 +601,17 @@ impl FrameRoot {
             .sync_initial_values(config.start_time.as_deref(), config.end_time.as_deref());
 
         if let Some(session) = &self.preview_ui.session {
-            let snapshot = session.snapshot();
-            if !self.preview_media_snapshot_sync_blocked() {
-                self.preview_ui.playback.sync_media(MediaSnapshot {
-                    current_time: snapshot.playback.position_seconds,
-                    duration: snapshot.playback.duration_seconds,
-                    paused: !snapshot.playback.playing,
-                });
+            // 读侧跳过：预览重配置在飞时（后台线程正持 pipeline 锁重建 FFmpeg 预览管线），
+            // 渲染路径不取 snapshot，避免主线程被该锁阻塞（表现为关闭动画冻结约 200ms）。
+            if self.preview_ui.pending_runtime_key.is_none() {
+                let snapshot = session.snapshot();
+                if !self.preview_media_snapshot_sync_blocked() {
+                    self.preview_ui.playback.sync_media(MediaSnapshot {
+                        current_time: snapshot.playback.position_seconds,
+                        duration: snapshot.playback.duration_seconds,
+                        paused: !snapshot.playback.playing,
+                    });
+                }
             }
         } else if media_kind == PreviewMediaKind::Unknown {
             self.preview_ui.playback.clear_media();
@@ -819,6 +824,35 @@ impl FrameRoot {
             self.preview_ui.draft_crop = None;
             self.preview_ui.crop_drag = None;
         }
+    }
+    /// 「原片 / 映射后」对比态按选中文件重置（新文件默认看映射后）。
+    /// 由渲染路径在构造预览请求之前调用，保证首帧不带上一文件的对比态。
+    pub(super) fn sync_preview_hdr_compare_for_selection(&mut self, selected_file_id: Option<&str>) {
+        if self.preview_ui.hdr_compare_file_id.as_deref() == selected_file_id {
+            return;
+        }
+        self.preview_ui.hdr_compare_file_id = selected_file_id.map(str::to_string);
+        self.preview_ui.hdr_preview_bypass = false;
+    }
+    /// 「原片 / 映射后」切换：翻转预览对比态。仅在映射段实际生效时可用
+    /// （SDR / 未勾选时无对比意义；DV 未被覆盖救回时同样不可用）。
+    /// 真实配置不动——绕过只作用于预览请求的配置副本。
+    pub(super) fn toggle_selected_hdr_preview_compare(&mut self) -> bool {
+        let metadata = self.selected_source_metadata();
+        let Some(config) = self.selected_config() else {
+            return false;
+        };
+        if !preview_transform_controls_enabled(
+            metadata.as_ref(),
+            config,
+            self.file_queue.selected_file_locked(),
+        ) || !hdr_toggle_checked(config)
+        {
+            return false;
+        }
+
+        self.preview_ui.hdr_preview_bypass = !self.preview_ui.hdr_preview_bypass;
+        true
     }
     pub(super) fn preview_crop_render_state(
         &self,
@@ -2062,6 +2096,7 @@ fn preview_runtime_request(
     metadata_entry: &SourceMetadataEntry,
     include_applied_crop: bool,
     include_committed_overlay: bool,
+    hdr_preview_bypass: bool,
     preview_dimensions: PreviewRuntimeDimensions,
 ) -> Option<PreviewRuntimeRequest> {
     if metadata_entry.status != MetadataStatus::Ready {
@@ -2078,6 +2113,11 @@ fn preview_runtime_request(
     }
     if !include_committed_overlay {
         preview_config.overlay = None;
+    }
+    if hdr_preview_bypass {
+        // 「原片」对照：只关闭本次副本的开关，让滤镜链临时不含映射段，
+        // 真实配置不动。开关进视觉哈希，切换即可触发热重建。
+        preview_config.hdr_conversion_enabled = false;
     }
     let core_config = core_config_from_gpui(&preview_config);
     let presentation = PreviewRenderPresentation::default();
@@ -2192,6 +2232,13 @@ fn preview_visual_hash(config: &ConversionConfig) -> u64 {
     hash_video_filters(&config.video_filters, &mut state);
     config.gif_colors.hash(&mut state);
     config.gif_dither.hash(&mut state);
+    // HDR 映射段输入全量入哈希：勾选/算法/峰值/覆盖/源类型任一变化都要重建
+    // 预览（含「原片 / 映射后」对比切换——切换即改副本开关，必须触发哈希变化）。
+    config.hdr_conversion_enabled.hash(&mut state);
+    config.hdr_tonemap_algorithm.hash(&mut state);
+    config.hdr_source_peak.hash(&mut state);
+    config.hdr_source_override.hash(&mut state);
+    config.hdr_source_kind.hash(&mut state);
     state.finish()
 }
 

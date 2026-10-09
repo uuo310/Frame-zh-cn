@@ -59,6 +59,37 @@ pub fn is_prores_4444_tier(value: &str) -> bool {
     matches!(value, "4444" | "4444xq")
 }
 
+/// H.264「默认」档（不发 `-profile:v`）编码器实际落到的档案名。
+///
+/// 实测（`ffprobe` 读流 profile）：`libx264` 与 `h264_nvenc` 均按**输入**
+/// 像素格式落档案——High 10（4:2:0 10-bit）／High 4:2:2（4:2:2）／
+/// `High 4:4:4 Predictive`（4:4:4）两表一致；唯一差异是 4:2:0 8-bit：
+/// `libx264` 落 High、`h264_nvenc` 落 Main。
+///
+/// `pixel_format` 应为**实际生效**（HDR 链落点 / 手选档）或**源探测**的像素
+/// 格式；无法判定的取值（未解析的 `auto`）返回 `None`——非 HDR 下由编码器与
+/// 源自决，静态标注即是撒谎。
+#[must_use]
+pub fn h264_auto_profile_landing(video_codec: &str, pixel_format: &str) -> Option<&'static str> {
+    let default_420 = match video_codec {
+        "libx264" => "High",
+        "h264_nvenc" => "Main",
+        _ => return None,
+    };
+    let pixel_format = pixel_format.trim().to_ascii_lowercase();
+    if pixel_format.contains("444") {
+        Some("High 4:4:4 Predictive")
+    } else if pixel_format.contains("422") {
+        Some("High 4:2:2")
+    } else if is_ten_bit_pixel_format(&pixel_format) {
+        Some("High 10")
+    } else if pixel_format.contains("420") {
+        Some(default_420)
+    } else {
+        None
+    }
+}
+
 /// H.264 兼容性 profile 的 `-profile:v` 取值（仅 libx264 / h264_nvenc）。
 ///
 /// x264 的 8-bit 档位与 10-bit 输出**互斥**：实测 pin 8.1.2 上
@@ -66,6 +97,10 @@ pub fn is_prores_4444_tier(value: &str) -> bool {
 /// ⇒ 显式 10-bit 像素格式时一律不发 profile（10-bit 会自动落到 High 10 档案，
 /// 与「不暴露 10-bit 档位」的口径一致）。NVENC 侧无需此约束：实测 high × 10-bit
 /// 会自动升级为 High 10（rc=0）。
+///
+/// `pixel_format` 应为**实际生效**的像素格式：调用方经
+/// `crate::filters::effective_pixel_format` 解析后再传入，`auto` 字面值在
+/// HDR 生效时会失明（链已落 10-bit，守卫却放行 8-bit 档位）。
 #[must_use]
 pub fn h264_profile_value(
     video_codec: &str,
@@ -107,15 +142,12 @@ pub fn add_profile_args(args: &mut Vec<String>, config: &ConversionConfig) {
     } else {
         &config.nvenc_h264_profile
     };
-    let value = h264_profile_value(&config.video_codec, h264_value, &config.pixel_format).or_else(
-        || {
-            prores_profile_value(
-                &config.video_codec,
-                &config.prores_profile,
-                &config.pixel_format,
-            )
-        },
-    );
+    // 守卫读「实际生效」的像素格式：HDR 生效 + `auto` 时字面值仍是 `auto`，
+    // 而链尾已落 10-bit——按字面值判断会放行 `-profile high` × 10-bit 硬报错。
+    let pixel_format = crate::filters::effective_pixel_format(config);
+    let value = h264_profile_value(&config.video_codec, h264_value, pixel_format).or_else(|| {
+        prores_profile_value(&config.video_codec, &config.prores_profile, pixel_format)
+    });
     if let Some(value) = value {
         args.push("-profile:v".to_string());
         args.push(value.to_string());
@@ -169,6 +201,43 @@ mod tests {
             h264_profile_value("h264_nvenc", "high", "yuv420p10le"),
             Some("high")
         );
+    }
+
+    #[test]
+    fn h264_auto_profile_landing_maps_measured_archives() {
+        // 实测（ffprobe 读流）：libx264 不发 profile 时按输入像素格式落对应档案。
+        for (pixel_format, profile) in [
+            ("yuv420p", "High"),
+            ("yuv420p10le", "High 10"),
+            ("yuv422p", "High 4:2:2"),
+            ("yuv422p10le", "High 4:2:2"),
+            ("yuv444p", "High 4:4:4 Predictive"),
+            ("yuv444p10le", "High 4:4:4 Predictive"),
+        ] {
+            assert_eq!(
+                h264_auto_profile_landing("libx264", pixel_format),
+                Some(profile)
+            );
+        }
+        // NVENC 同表，唯一差异 = 4:2:0 8-bit 落 Main（libx264 落 High）。
+        for (pixel_format, profile) in [
+            ("yuv420p", "Main"),
+            ("yuv420p10le", "High 10"),
+            ("yuv422p", "High 4:2:2"),
+            ("yuv422p10le", "High 4:2:2"),
+            ("yuv444p", "High 4:4:4 Predictive"),
+            ("yuv444p10le", "High 4:4:4 Predictive"),
+        ] {
+            assert_eq!(
+                h264_auto_profile_landing("h264_nvenc", pixel_format),
+                Some(profile)
+            );
+        }
+        // 未解析的 auto（HDR 链外由编码器与源协商，不可静态推断）与不适用编码器 → 不标。
+        assert!(h264_auto_profile_landing("libx264", "auto").is_none());
+        assert!(h264_auto_profile_landing("h264_nvenc", "auto").is_none());
+        assert!(h264_auto_profile_landing("libx264", "").is_none());
+        assert!(h264_auto_profile_landing("libx265", "yuv420p").is_none());
     }
 
     #[test]

@@ -155,6 +155,11 @@ impl FrameRoot {
                 .file_queue
                 .selected_file()
                 .map_or_else(String::new, |file| file.config.x265_rdoq_level.clone()),
+            FrameTextInputKind::VideoHdrSourcePeak => self
+                .file_queue
+                .selected_file()
+                .and_then(|file| file.config.hdr_source_peak)
+                .map_or_else(String::new, |nit| nit.to_string()),
             FrameTextInputKind::GifLoop => self
                 .file_queue
                 .selected_file()
@@ -350,6 +355,20 @@ impl FrameRoot {
                     apply_x265_rdoq_level(&mut file.config, &next);
                 })?;
                 Some(next)
+            }
+            FrameTextInputKind::VideoHdrSourcePeak => {
+                if self.file_queue.selected_file_locked() {
+                    return None;
+                }
+                let next = sanitize_number_input(candidate);
+                let file = self.file_queue.selected_file_mut()?;
+                apply_hdr_source_peak(&mut file.config, &next);
+                // 回读实际值（含 clamp 100–10000、空串=自动），保证输入框与配置一致。
+                Some(
+                    file.config
+                        .hdr_source_peak
+                        .map_or_else(String::new, |nit| nit.to_string()),
+                )
             }
             FrameTextInputKind::GifLoop => {
                 if self.file_queue.selected_file_locked() {

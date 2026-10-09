@@ -78,7 +78,18 @@ impl Element for FileDropLifecycleProbe {
 
 impl FrameRoot {
     pub(super) fn select_workspace_file(&mut self, id: &str) -> bool {
-        !self.update_installation_in_progress() && self.file_queue.select_existing_file(id)
+        if self.update_installation_in_progress() {
+            return false;
+        }
+        let previous = self.file_queue.selected_file_id().map(str::to_owned);
+        if !self.file_queue.select_existing_file(id) {
+            return false;
+        }
+        if self.file_queue.selected_file_id() != previous.as_deref() {
+            // 语境变更（换文件）：色彩管理视图态回默认，收起不跨文件粘滞。
+            self.reset_hdr_view_defaults();
+        }
+        true
     }
 
     pub(super) fn toggle_file_batch_selection(&mut self, id: &str) -> Option<bool> {
@@ -188,7 +199,12 @@ impl FrameRoot {
                 if root.update_installation_in_progress() {
                     return;
                 }
+                let previous = root.file_queue.selected_file_id().map(str::to_owned);
                 if root.file_queue.add_files(files) > 0 {
+                    if root.file_queue.selected_file_id() != previous.as_deref() {
+                        // 首次载入的自动选中同为语境变更：色彩管理视图态回默认。
+                        root.reset_hdr_view_defaults();
+                    }
                     for (file_id, file_path) in probe_targets {
                         root.queue_source_metadata_probe(file_id, file_path, cx);
                     }

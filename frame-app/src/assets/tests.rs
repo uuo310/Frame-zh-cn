@@ -36,6 +36,7 @@ mod frame_assets {
             "bookmark.svg",
             "captions.svg",
             "check.svg",
+            "chevron-down.svg",
             "close.svg",
             "copy.svg",
             "crop.svg",
@@ -88,6 +89,9 @@ mod frame_assets {
     fn ui_icon_assets_use_hugeicons_stroke_style() {
         let renderer = gpui::SvgRenderer::new(std::sync::Arc::new(FrameAssets));
 
+        // 注：ICON_CHEVRON_DOWN 为折叠键专用图标，按设计裁定加粗至 2.0 描边，
+        // 故不纳入本用例（本用例断言全族统一 1.5）。其 24px 栅格 / stroke 渲染由
+        // list_returns_original_frame_icon_assets 覆盖。
         for icon in [
             ICON_ARROW_DOWN,
             ICON_LAYOUT_LIST,

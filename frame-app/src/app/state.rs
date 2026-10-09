@@ -156,6 +156,15 @@ impl FrameRoot {
         self.update_selected_config_inner(update, true)
     }
 
+    /// 「语境回到默认」：色彩管理块展开、「高级」子区折叠。
+    ///
+    /// 换文件（面板展示对象变更）时调用——视图态不跨文件粘滞，新语境从默认档
+    /// 开始；同一文件内的调参与手动折叠不被打断。
+    pub(super) const fn reset_hdr_view_defaults(&mut self) {
+        self.settings_ui.hdr_section_expanded = true;
+        self.settings_ui.hdr_advanced_expanded = false;
+    }
+
     /// Mutate the selected config without recording a custom snapshot. Used by non-manual
     /// paths (preset application, normalization) so they never overwrite a suspended Custom
     /// Work State.

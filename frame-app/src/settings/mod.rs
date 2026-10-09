@@ -1,6 +1,7 @@
 //! Settings panel state and visibility rules for the native inspector.
 
 mod filter_updates;
+mod hdr;
 mod model;
 mod options;
 mod preset_state;
@@ -12,6 +13,7 @@ mod tests;
 mod updates;
 
 pub use filter_updates::*;
+pub use hdr::*;
 pub use model::*;
 pub use options::*;
 pub use preset_state::*;

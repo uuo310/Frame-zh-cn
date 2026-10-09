@@ -134,7 +134,9 @@ pub fn source_metadata_from_probe(probe: ProbeMetadata) -> SourceMetadata {
         color_space: probe.color_space,
         color_range: probe.color_range,
         color_primaries: probe.color_primaries,
+        color_transfer: probe.color_transfer,
         profile: probe.profile,
+        dolby_vision: probe.dolby_vision,
         transport_stream: probe.transport_stream,
         video_stream_index: probe.video_stream_index,
     }
@@ -221,12 +223,26 @@ mod tests {
                 width: Some(1920),
                 height: Some(1080),
                 pixel_format: Some("yuv420p".to_string()),
+                color_transfer: Some("smpte2084".to_string()),
                 ..ProbeMetadata::default()
             });
 
             assert_eq!(metadata.media_kind, Some(SourceKind::Video));
             assert_eq!(metadata.video_codec.as_deref(), Some("h264"));
             assert_eq!(metadata.resolution.as_deref(), Some("1920x1080"));
+            assert_eq!(metadata.color_transfer.as_deref(), Some("smpte2084"));
+        }
+
+        #[test]
+        fn maps_dolby_vision_flag() {
+            let straight = source_metadata_from_probe(ProbeMetadata::default());
+            assert!(!straight.dolby_vision);
+
+            let dv = source_metadata_from_probe(ProbeMetadata {
+                dolby_vision: true,
+                ..ProbeMetadata::default()
+            });
+            assert!(dv.dolby_vision);
         }
 
         #[test]

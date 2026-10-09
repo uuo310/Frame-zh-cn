@@ -1,8 +1,18 @@
 use super::*;
+use crate::SETTINGS_CONTROL_HEIGHT;
 use crate::capabilities::hw_decode_backend;
 use crate::numeric::u32_to_u8;
+use crate::settings::{
+    HdrSelectOption, HdrSourceStatus, HdrSourceStatusTone, apply_hdr_conversion,
+    effective_pixel_format, hdr_module_interactive, hdr_section_collapsed,
+    hdr_source_override_options, hdr_source_override_suffix, hdr_source_peak_options,
+    hdr_source_status, hdr_tonemap_algorithm_options, hdr_toggle_checked,
+    pixel_format_landing_suffix, profile_landing_label, profile_landing_suffix,
+};
+use frame_core::filters::hdr_tonemap_container_applies;
 use frame_core::psy;
 use frame_core::types::HwDecodeBackend;
+use gpui::{Transformation, radians, svg};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SettingsVideoRangeTarget {
@@ -39,6 +49,8 @@ pub(in crate::app) fn settings_video_tab(
     config: &ConversionConfig,
     settings_disabled: bool,
     available_encoders: &AvailableEncoders,
+    hdr_advanced_expanded: bool,
+    hdr_section_expanded: bool,
     focuses: SettingsVideoInputFocuses<'_>,
     pixel_format_select: SettingsVideoSelectUi<'_>,
     codec_select: SettingsVideoSelectUi<'_>,
@@ -47,6 +59,9 @@ pub(in crate::app) fn settings_video_tab(
     scaling_select: SettingsVideoSelectUi<'_>,
     fps_select: SettingsVideoSelectUi<'_>,
     profile_select: SettingsVideoSelectUi<'_>,
+    tonemap_algorithm_select: SettingsVideoSelectUi<'_>,
+    source_peak_select: SettingsVideoSelectUi<'_>,
+    source_override_select: SettingsVideoSelectUi<'_>,
     metadata: Option<&SourceMetadata>,
     tooltip_visible_id: Option<&str>,
     palette: &'static theme::ThemePalette,
@@ -54,12 +69,12 @@ pub(in crate::app) fn settings_video_tab(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let is_gif_mode = is_gif_container(&config.container);
-    let pixel_format_options = video_pixel_format_options(config)
+    let pixel_format_options = video_pixel_format_options(config, metadata)
         .into_iter()
         .map(|option| VideoSelectOption {
             id: option.id,
             label: option.label.to_string(),
-            caption: option.caption.to_string(),
+            caption: option.caption,
             selected: option.is_selected,
             enabled: !settings_disabled && !option.is_disabled,
         })
@@ -115,13 +130,15 @@ pub(in crate::app) fn settings_video_tab(
         })
         .collect::<Vec<_>>();
     let fps_selected_label = fps_label(&config.fps);
-    let profile_options = video_profile_options(config, settings_disabled);
+    let profile_options = video_profile_options(config, settings_disabled, metadata);
     let profile_selected_label = profile_options
         .iter()
         .find(|option| option.selected)
-        .map_or_else(|| "跟随默认".to_string(), |option| option.label.clone());
-    // 状态后缀只属于分辨率/帧率行（选中项 caption 即落点，如 3840×2160 / 30 fps）；
-    // 编码、像素格式、预设等行的 caption 语义不同，永不进触发器。
+        .map_or_else(|| "默认".to_string(), |option| option.label.clone());
+    // 状态后缀只挂「落点需推断」的行：分辨率/帧率取选中项 caption（如「原始
+    // 3840×2160」的 caption 部分），像素格式/编码兼容性取联动落点标注
+    // （见 `pixel_format_landing_suffix` / `profile_landing_suffix`）；
+    // 编码、预设等行的 caption 语义不同，永不进触发器。
     let selected_caption = |options: &Vec<VideoSelectOption>| -> Option<String> {
         options
             .iter()
@@ -253,7 +270,7 @@ pub(in crate::app) fn settings_video_tab(
                 id: VideoSelectId::PixelFormat,
                 options: pixel_format_options,
                 selected_label: pixel_format_selected_label,
-                value_suffix: None,
+                value_suffix: pixel_format_landing_suffix(config, metadata),
                 enabled: !settings_disabled,
                 tooltip_visible_id,
                 palette,
@@ -262,6 +279,27 @@ pub(in crate::app) fn settings_video_tab(
             window,
             cx,
         ))
+        // 「色彩管理」＝源色彩链路的一次性取向（HDR 源 → 标准 SDR），紧随像素格式；
+        // 图像/GIF 容器不承载映射段（与滤镜层同判据），整块隐藏。
+        .when(hdr_tonemap_container_applies(&config.container), |this| {
+            this.child(settings_video_hdr_section(
+                SettingsVideoHdrSectionState {
+                    config,
+                    metadata,
+                    settings_disabled,
+                    advanced_expanded: hdr_advanced_expanded,
+                    section_expanded: hdr_section_expanded,
+                    hdr_source_peak_focus: focuses.hdr_source_peak,
+                    tooltip_visible_id,
+                    tonemap_algorithm_select,
+                    source_peak_select,
+                    source_override_select,
+                    palette,
+                },
+                window,
+                cx,
+            ))
+        })
         .when(
             !is_videotoolbox_video_codec(&config.video_codec)
                 && config.video_codec != "mpeg2video"
@@ -293,7 +331,7 @@ pub(in crate::app) fn settings_video_tab(
                         id: VideoSelectId::Profile,
                         options: profile_options,
                         selected_label: profile_selected_label,
-                        value_suffix: None,
+                        value_suffix: profile_landing_suffix(config, metadata),
                         enabled: !settings_disabled,
                         tooltip_visible_id,
                         palette,
@@ -340,6 +378,492 @@ pub(in crate::app) fn settings_video_tab(
             palette,
             cx,
         ))
+}
+
+/// 「色彩管理」折叠键图标尺寸（设计像素）——一级（块标题行 / 收起行）。
+const VIDEO_HDR_ARROW_SIZE: f32 = 14.0;
+
+/// 「高级」折叠键图标尺寸（设计像素）——二级（行内折叠，比一级小一档）。
+const VIDEO_HDR_ADVANCED_ARROW_SIZE: f32 = 11.0;
+
+/// 「高级」折叠里子行相对模块左缘的缩进（设计像素）。
+const VIDEO_HDR_ADVANCED_INDENT: f32 = 16.0;
+
+/// 「色彩管理」整块与下方「编码速度」行之间的额外身位（设计像素）。
+///
+/// 页根容器标准行距为 16px；色彩管理块（展开 / 收起 / 平铺三种形态）都在块底再补
+/// 这一档，让色彩链路与编码器参数族在竖直方向上脱开。
+const VIDEO_HDR_BLOCK_BOTTOM_GAP: f32 = 16.0;
+
+/// 「色彩管理」模块渲染状态（配置 + 三个下拉的渲染句柄）。
+struct SettingsVideoHdrSectionState<'a> {
+    config: &'a ConversionConfig,
+    metadata: Option<&'a SourceMetadata>,
+    settings_disabled: bool,
+    advanced_expanded: bool,
+    /// HDR 系整块是否展开（默认展开；手动收起后成一行；非 HDR 系恒平铺不看此位）。
+    section_expanded: bool,
+    hdr_source_peak_focus: Option<&'a FocusHandle>,
+    tooltip_visible_id: Option<&'a str>,
+    tonemap_algorithm_select: SettingsVideoSelectUi<'a>,
+    source_peak_select: SettingsVideoSelectUi<'a>,
+    source_override_select: SettingsVideoSelectUi<'a>,
+    palette: &'static theme::ThemePalette,
+}
+
+/// 「色彩管理」模块（需求 §4.1）：标题行（区块标题 + 源状态摘要，同排）+ 转换开关 +
+/// 映射算法 + 「高级」折叠（源峰值亮度 / 源类型覆盖；工作流提示并入高级行）。
+///
+/// 三形态共用同一条标题行 [`settings_video_hdr_title_row`]（标签列 + 值区容器）：
+/// 标题「色彩管理」占标签列，源状态摘要占值列（字头对齐上下触发器值文本），块级
+/// 折叠键贴值区容器右端（右缘对齐触发器箭头）。
+/// - 非 HDR 系（SDR / DV /「视为 SDR」）：平铺显示生效项——标题行（含状态）+
+///   源类型覆盖行（唯一可调项就一项，折叠无意义）；灰控件与提示不渲染。
+/// - HDR 系（探测 PQ/HLG 或强制覆盖）：完整块 + 整块可折叠（默认展开；
+///   手动收起后仅余标题行，键位不变）。
+///
+/// 置灰语义：HDR 系下开关 / 算法 / 峰值随锁定置灰（防「勾了却不转」）；
+/// 源类型覆盖恒可操作——它是把 SDR/DV 判定翻转为 HDR 的救回通道。
+fn settings_video_hdr_section(
+    state: SettingsVideoHdrSectionState<'_>,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let SettingsVideoHdrSectionState {
+        config,
+        metadata,
+        settings_disabled,
+        advanced_expanded,
+        section_expanded,
+        hdr_source_peak_focus,
+        tooltip_visible_id,
+        tonemap_algorithm_select,
+        source_peak_select,
+        source_override_select,
+        palette,
+    } = state;
+    let status = hdr_source_status(config, metadata);
+
+    if !hdr_module_interactive(config) {
+        return settings_video_hdr_flat_section(
+            config,
+            settings_disabled,
+            &status,
+            tooltip_visible_id,
+            source_override_select,
+            palette,
+            window,
+            cx,
+        )
+        .mb(theme::ui_rem(VIDEO_HDR_BLOCK_BOTTOM_GAP));
+    }
+
+    if hdr_section_collapsed(config, section_expanded) {
+        return div()
+            .child(settings_video_hdr_collapsed_section(&status, palette, cx))
+            .mb(theme::ui_rem(VIDEO_HDR_BLOCK_BOTTOM_GAP));
+    }
+
+    // 本分支已保证 HDR 系（`hdr_module_interactive` 为真），控件只随锁定置灰。
+    let controls_disabled = settings_disabled;
+    let tonemap_options = hdr_row_options(hdr_tonemap_algorithm_options(config, controls_disabled));
+    let tonemap_selected = hdr_selected_label(&tonemap_options, "Hable");
+    let source_peak_options = hdr_row_options(hdr_source_peak_options(config, controls_disabled));
+    let source_peak_selected = hdr_selected_label(&source_peak_options, "自动");
+    let override_options = hdr_row_options(hdr_source_override_options(config, settings_disabled));
+    let override_selected = hdr_selected_label(&override_options, "自动");
+
+    let mut section = settings_video_section_shell(
+        settings_video_hdr_title_row(
+            &status,
+            Some(hdr_section_toggle_key(palette, cx)),
+            palette,
+        ),
+        palette,
+    )
+        .child(settings_video_checkbox_row(
+            "video-hdr-conversion",
+            "HDR → SDR 转换",
+            "转换为标准 SDR（BT.709），供剪辑与播放软件识别",
+            hdr_toggle_checked(config),
+            controls_disabled,
+            palette,
+            cx,
+            move |root, _event, _window, cx| {
+                if controls_disabled {
+                    return;
+                }
+                if root.update_selected_config(|config| {
+                    apply_hdr_conversion(config, !config.hdr_conversion_enabled)
+                }) {
+                    cx.notify();
+                }
+            },
+        ))
+        .child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::TonemapAlgorithm,
+                options: tonemap_options,
+                selected_label: tonemap_selected,
+                value_suffix: None,
+                enabled: !controls_disabled,
+                tooltip_visible_id,
+                palette,
+                ui: tonemap_algorithm_select,
+            },
+            window,
+            cx,
+        ))
+        .child(settings_video_hdr_advanced_row(advanced_expanded, palette, cx));
+
+    if advanced_expanded {
+        let mut advanced = div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(video_select_row(
+                VideoSelectRowState {
+                    id: VideoSelectId::SourcePeak,
+                    options: source_peak_options,
+                    selected_label: source_peak_selected,
+                    value_suffix: None,
+                    enabled: !controls_disabled,
+                    tooltip_visible_id,
+                    palette,
+                    ui: source_peak_select,
+                },
+                window,
+                cx,
+            ));
+        // 手动档才出现数值框；清空输入回落「自动」后该行随之消失（同一判据）。
+        if let Some(nit) = config.hdr_source_peak {
+            advanced = advanced.child(settings_dimension_row(
+                "源峰值",
+                "settings-video-hdr-source-peak-field",
+                &nit.to_string(),
+                "1000",
+                controls_disabled,
+                hdr_source_peak_focus,
+                FrameTextInputKind::VideoHdrSourcePeak,
+                palette,
+                window,
+                cx,
+            ));
+        }
+        advanced = advanced.child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::SourceOverride,
+                options: override_options,
+                selected_label: override_selected,
+                value_suffix: hdr_source_override_suffix(config).map(str::to_string),
+                enabled: !settings_disabled,
+                tooltip_visible_id,
+                palette,
+                ui: source_override_select,
+            },
+            window,
+            cx,
+        ));
+        section = section.child(
+            div()
+                .ml(theme::ui_rem(VIDEO_HDR_ADVANCED_INDENT))
+                .child(advanced),
+        );
+    }
+
+    section.mb(theme::ui_rem(VIDEO_HDR_BLOCK_BOTTOM_GAP))
+}
+
+/// 「色彩管理」非 HDR 系平铺形态：只显示生效项——标题行（区块标题 + 源状态摘要）+
+/// 源类型覆盖行。
+///
+/// 唯一可调项（覆盖）就一项，无折叠、无折叠键；灰控件（转换开关 / 映射算法 /
+/// 源峰值）与提示不渲染。覆盖改选 HDR 档后判定翻转，块即刻切到完整形态。
+#[expect(
+    clippy::too_many_arguments,
+    reason = "The flat HDR section builder keeps config, status, select handle, and styling slots explicit at the call site."
+)]
+fn settings_video_hdr_flat_section(
+    config: &ConversionConfig,
+    settings_disabled: bool,
+    status: &HdrSourceStatus,
+    tooltip_visible_id: Option<&str>,
+    source_override_select: SettingsVideoSelectUi<'_>,
+    palette: &'static theme::ThemePalette,
+    window: &mut Window,
+    cx: &mut Context<FrameRoot>,
+) -> gpui::Div {
+    let override_options = hdr_row_options(hdr_source_override_options(config, settings_disabled));
+    let override_selected = hdr_selected_label(&override_options, "自动");
+    settings_video_section_shell(
+        settings_video_hdr_title_row(status, None, palette),
+        palette,
+    )
+        .child(video_select_row(
+            VideoSelectRowState {
+                id: VideoSelectId::SourceOverride,
+                options: override_options,
+                selected_label: override_selected,
+                value_suffix: hdr_source_override_suffix(config).map(str::to_string),
+                enabled: !settings_disabled,
+                tooltip_visible_id,
+                palette,
+                ui: source_override_select,
+            },
+            window,
+            cx,
+        ))
+}
+
+/// 「色彩管理」收起态（HDR 系）：仅余标题行（区块标题 + 源状态摘要 + 折叠键 ‹ 右端）。
+///
+/// 行结构与上下触发器同构（标签列 + 值区容器），摘要字头与折叠键右缘均与触发器对齐；
+/// 整行可点就地展开（键位恒定在右端，收起 / 展开不跳）。
+fn settings_video_hdr_collapsed_section(
+    status: &HdrSourceStatus,
+    palette: &'static theme::ThemePalette,
+    cx: &Context<FrameRoot>,
+) -> gpui::Stateful<gpui::Div> {
+    apply_accessible_button(
+        div()
+            .id("video-hdr-section-collapsed")
+            .hover(gpui::Styled::cursor_pointer)
+            .on_click(cx.listener(|root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                root.settings_ui.hdr_section_expanded = true;
+                cx.notify();
+            }))
+            .flex()
+            .flex_col()
+            .gap_3()
+            .child(settings_video_section_header_block(
+                settings_video_hdr_title_row(
+                    status,
+                    Some(hdr_section_toggle_icon(true, palette).into_any_element()),
+                    palette,
+                ),
+                palette,
+            )),
+        "展开色彩管理",
+        true,
+        palette,
+    )
+}
+
+/// 「色彩管理」折叠键图标：同一枚无杆 chevron，收起转 90°（∨→‹）、展开正位（∨）。
+///
+/// 收起行内为纯视觉件（交互由整行按钮承担），展开态由 [`hdr_section_toggle_key`]
+/// 包成按钮；两处共用本函数，尺寸 / 色彩 / 旋转单源。
+/// 色彩＝全亮（`text_primary`，与触发器箭头同档，不与弱化灰同色）。
+fn hdr_section_toggle_icon(
+    collapsed: bool,
+    palette: &'static theme::ThemePalette,
+) -> impl IntoElement {
+    let rotation = if collapsed {
+        radians(std::f32::consts::FRAC_PI_2)
+    } else {
+        radians(0.0)
+    };
+    svg()
+        .path(crate::assets::ICON_CHEVRON_DOWN)
+        .w(theme::ui_rem(VIDEO_HDR_ARROW_SIZE))
+        .h(theme::ui_rem(VIDEO_HDR_ARROW_SIZE))
+        .text_color(color(palette.text_primary))
+        .with_transformation(Transformation::rotate(rotation))
+}
+
+/// 「色彩管理」展开态标题行右端的收起入口：点键收回一行（键位恒在右端同一列）。
+///
+/// 只切换视图状态、不触碰配置，不受锁定与置灰影响（与「高级」折叠行同款）。
+fn hdr_section_toggle_key(
+    palette: &'static theme::ThemePalette,
+    cx: &Context<FrameRoot>,
+) -> gpui::AnyElement {
+    apply_accessible_button(
+        div()
+            .id("video-hdr-section-collapse")
+            .flex()
+            .items_center()
+            .hover(gpui::Styled::cursor_pointer)
+            .on_click(cx.listener(|root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                root.settings_ui.hdr_section_expanded = false;
+                cx.notify();
+            }))
+            .child(hdr_section_toggle_icon(false, palette)),
+        "收起色彩管理",
+        true,
+        palette,
+    )
+    .into_any_element()
+}
+
+/// 「色彩管理」标题行（三形态共用）：与上下触发器行同构——标签列（区块标题）+
+/// 值区容器（源状态摘要 + 可选折叠键）。
+///
+/// 值区容器复刻触发器盒子几何：宽 = 行宽 × [`VIDEO_SELECT_TRIGGER_WIDTH_RATIO`]、
+/// 左右内边距 10px、最小高度 [`SETTINGS_CONTROL_HEIGHT`]（与触发器盒同档）——
+/// - 摘要再内缩 [`FRAME_SELECT_VALUE_INDENT`] ⇒ 字头 x 与触发器值文本一致；
+/// - 尾随折叠键贴容器右缘 ⇒ 右缘与触发器箭头同竖线。
+///
+/// 摘要字重为 REGULAR（较标题与触发器值文本轻一档，呈注记观感）；色调随判定切换
+/// （正常 / 弱化 / 警告）。
+fn settings_video_hdr_title_row(
+    status: &HdrSourceStatus,
+    trailing: Option<gpui::AnyElement>,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    let tone_color = match status.tone {
+        HdrSourceStatusTone::Normal => color(palette.text_primary),
+        HdrSourceStatusTone::Muted => color(palette.text_muted),
+        HdrSourceStatusTone::Warning => color(palette.warning),
+    };
+    let mut value = div()
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_between()
+        .px(theme::ui_rem(10.0))
+        .min_h(theme::ui_rem(SETTINGS_CONTROL_HEIGHT))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .pl(theme::ui_rem(FRAME_SELECT_VALUE_INDENT))
+                .truncate()
+                .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+                .font_weight(theme::TEXT_WEIGHT_REGULAR)
+                .text_color(tone_color)
+                .child(theme::ui_text(&status.text)),
+        );
+    if let Some(trailing) = trailing {
+        value = value.child(div().flex_shrink_0().child(trailing));
+    }
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(settings_video_hdr_label_cell("色彩管理", palette))
+        .child(
+            div()
+                .flex_none()
+                .w(gpui::relative(VIDEO_SELECT_TRIGGER_WIDTH_RATIO))
+                .child(value),
+        )
+}
+
+/// 模块内的行标签列：与下拉行标签同宽同款，保证竖向对齐。
+fn settings_video_hdr_label_cell(
+    label: &'static str,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .flex_none()
+        .w(theme::ui_rem(VIDEO_SELECT_LABEL_COLUMN_WIDTH))
+        .min_w_0()
+        .truncate()
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(color(palette.text_primary))
+        .child(theme::ui_text(label))
+}
+
+/// 「高级」折叠行（含工作流提示）：与「色彩管理」标题行同构——标签列（折叠键 +
+/// 文案）+ 值区容器（提示文字）。
+///
+/// 二级键：同枚 chevron、尺寸小一档（[`VIDEO_HDR_ADVANCED_ARROW_SIZE`]）、
+/// 色彩与块级键同档（全亮 `text_primary`）、旋转语言与块级键一致（收起 ‹ / 展开 ∨）。
+/// 提示文字落值区容器（左右内边距 10px、最小高度与触发器盒同档、再内缩
+/// [`FRAME_SELECT_VALUE_INDENT`]）——字头与「色彩管理」摘要、各触发器值文本同列。
+/// 该行只切换视图状态、不触碰配置，因此不受锁定与置灰影响。
+fn settings_video_hdr_advanced_row(
+    expanded: bool,
+    palette: &'static theme::ThemePalette,
+    cx: &Context<FrameRoot>,
+) -> gpui::Div {
+    let rotation = if expanded {
+        radians(0.0)
+    } else {
+        radians(std::f32::consts::FRAC_PI_2)
+    };
+    let arrow = svg()
+        .path(crate::assets::ICON_CHEVRON_DOWN)
+        .w(theme::ui_rem(VIDEO_HDR_ADVANCED_ARROW_SIZE))
+        .h(theme::ui_rem(VIDEO_HDR_ADVANCED_ARROW_SIZE))
+        .text_color(color(palette.text_primary))
+        .with_transformation(Transformation::rotate(rotation));
+    let toggle = apply_accessible_button(
+        div()
+            .id("video-hdr-advanced-toggle")
+            .flex()
+            .items_center()
+            .gap_2()
+            .hover(gpui::Styled::cursor_pointer)
+            .on_click(cx.listener(move |root, _: &ClickEvent, _window, cx| {
+                cx.stop_propagation();
+                root.settings_ui.hdr_advanced_expanded = !root.settings_ui.hdr_advanced_expanded;
+                cx.notify();
+            }))
+            .child(arrow)
+            .child(
+                div()
+                    .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+                    .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+                    .text_color(color(palette.text_primary))
+                    .child(theme::ui_text("高级")),
+            ),
+        "高级",
+        true,
+        palette,
+    );
+    div()
+        .flex()
+        .items_center()
+        .gap_3()
+        .child(
+            div()
+                .flex_none()
+                .w(theme::ui_rem(VIDEO_SELECT_LABEL_COLUMN_WIDTH))
+                .child(toggle),
+        )
+        .child(
+            div()
+                .flex_none()
+                .w(gpui::relative(VIDEO_SELECT_TRIGGER_WIDTH_RATIO))
+                .flex()
+                .items_center()
+                .px(theme::ui_rem(10.0))
+                .min_h(theme::ui_rem(SETTINGS_CONTROL_HEIGHT))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .pl(theme::ui_rem(FRAME_SELECT_VALUE_INDENT))
+                        .truncate()
+                        .child(settings_hint_text("本机预压 → 剪映剪辑 → 成片回传精压", palette)),
+                ),
+        )
+}
+
+/// HdrSelectOption → 下拉行选项：置灰位在选项函数内已含行级门控，这里只做透传。
+fn hdr_row_options(options: Vec<HdrSelectOption>) -> Vec<VideoSelectOption> {
+    options
+        .into_iter()
+        .map(|option| VideoSelectOption {
+            id: option.id,
+            label: option.label.to_string(),
+            caption: option.caption.to_string(),
+            selected: option.is_selected,
+            enabled: !option.is_disabled,
+        })
+        .collect()
+}
+
+fn hdr_selected_label(options: &[VideoSelectOption], fallback: &str) -> String {
+    options
+        .iter()
+        .find(|option| option.selected)
+        .map_or_else(|| fallback.to_string(), |option| option.label.clone())
 }
 
 pub(in crate::app) fn video_resolution_select_options(
@@ -585,26 +1109,60 @@ const VIDEO_AQ_RIGHT_PULL: f32 = 13.0;
 const VIDEO_LABEL_ALPHA_SECONDARY: f32 = 0.80;
 const VIDEO_LABEL_ALPHA_TERTIARY: f32 = 0.62;
 
+/// 视频页节标题区外壳：标题行（由调用方给出，见下两函数）+ 标题下细分隔线，
+/// 外层纵向 `gap_3` 容器供追加正文行。
+fn settings_video_section_shell(
+    header_row: gpui::Div,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap_3()
+        .child(settings_video_section_header_block(header_row, palette))
+}
+
+/// 分区标题块：标题行 + 细分隔线，整体沿用 MEDIUM / 全亮标题字档。
+///
+/// 三种形态共用：常规分区传纯标题行 [`settings_video_plain_title_row`]；色彩管理块
+/// 传标签列行 [`settings_video_hdr_title_row`]（收起态直接把它塞进整行按钮，故也独立
+/// 引用本函数）。
+fn settings_video_section_header_block(
+    header_row: gpui::Div,
+    palette: &'static theme::ThemePalette,
+) -> gpui::Div {
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
+        .font_weight(theme::TEXT_WEIGHT_MEDIUM)
+        .text_color(color(palette.text_primary))
+        .child(header_row)
+        .child(
+            div()
+                .h(gpui::px(1.0))
+                .w_full()
+                .bg(color(palette.canvas))
+                .shadow(horizontal_separator_shadows(palette)),
+        )
+}
+
+/// 常规分区标题行：右端无尾随内容（左对齐单标题）。
+fn settings_video_plain_title_row(label: &'static str) -> gpui::Div {
+    div()
+        .w_full()
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap_3()
+        .child(theme::ui_text(label))
+}
+
 /// 视频页节标题：亮度提到与上半区下拉标签同级（全亮），分隔线与其余页同款。
 fn settings_video_section(label: &'static str, palette: &'static theme::ThemePalette) -> gpui::Div {
-    div().flex().flex_col().gap_3().child(
-        div()
-            .w_full()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .text_size(theme::ui_rem(theme::TEXT_UI_BASE_SIZE))
-            .font_weight(theme::TEXT_WEIGHT_MEDIUM)
-            .text_color(color(palette.text_primary))
-            .child(theme::ui_text(label))
-            .child(
-                div()
-                    .h(gpui::px(1.0))
-                    .w_full()
-                    .bg(color(palette.canvas))
-                    .shadow(horizontal_separator_shadows(palette)),
-            ),
-    )
+    settings_video_section_shell(settings_video_plain_title_row(label), palette)
 }
 
 /// 视频页二级标题（大项下的小项）。
@@ -851,7 +1409,7 @@ fn settings_video_group_label(
 }
 
 /// psy 字段列：标签贴在次级标题左线上，输入框保持列左缘（缩进只作用于标题）。
-/// 占位写的是编码器默认值提示（如「2.0（跟随默认）」），斜体＋降档由输入组件按 kind 处理。
+/// 占位写的是编码器默认值提示（如「2.0（默认）」），斜体＋降档由输入组件按 kind 处理。
 fn settings_video_psy_column(
     label: &'static str,
     spec: FrameTextInputSpec<'_>,
@@ -902,7 +1460,7 @@ fn settings_video_perception_section(
                             FrameTextInputSpec {
                                 id: "settings-video-x264-psy-rd-field",
                                 value: &config.x264_psy_rd,
-                                placeholder: "1.0（跟随默认）",
+                                placeholder: "1.0（默认）",
                                 disabled: psy_rd_disabled,
                                 focus: focuses.x264_psy_rd,
                                 kind: FrameTextInputKind::VideoX264PsyRd,
@@ -922,11 +1480,11 @@ fn settings_video_perception_section(
             let psy_rdoq_disabled = settings_disabled
                 || !psy::x265_psy_rdoq_effective(&config.x265_rdoq_level, &config.preset);
             let psy_rdoq_placeholder = format!(
-                "{}（跟随默认）",
+                "{}（默认）",
                 psy::x265_preset_psy_rdoq_default(&config.preset)
             );
-            let rd_level_placeholder = format!("{}（跟随默认）", rdo_defaults.rd);
-            let rdoq_level_placeholder = format!("{}（跟随默认）", rdo_defaults.rdoq_level);
+            let rd_level_placeholder = format!("{}（默认）", rdo_defaults.rd);
+            let rdoq_level_placeholder = format!("{}（默认）", rdo_defaults.rdoq_level);
             section = section
                 .child(settings_video_group_label(
                     "心理视觉优化",
@@ -943,7 +1501,7 @@ fn settings_video_perception_section(
                             FrameTextInputSpec {
                                 id: "settings-video-x265-psy-rd-field",
                                 value: &config.x265_psy_rd,
-                                placeholder: "2.0（跟随默认）",
+                                placeholder: "2.0（默认）",
                                 disabled: psy_rd_disabled,
                                 focus: focuses.x265_psy_rd,
                                 kind: FrameTextInputKind::VideoX265PsyRd,
@@ -1066,11 +1624,14 @@ fn settings_video_perception_section(
 
 /// 编码兼容性下拉项（H.264 软件 / NVIDIA）：兼容性取向，默认跟随编码器。
 ///
-/// caption 显示该档实际要发的 profile 值；「跟随默认」的 caption 给出该编码器
-/// 自己的默认档（x264 自动落 High、NVENC 默认 Main）。
+/// caption 显示该档实际要发的 profile 值；「默认」档的 caption 与触发器落点
+/// 后缀同源（同一 [`profile_landing_label`] 解析）：落点可解析时显化档案名
+/// （High 10 / High / Main 等），不可解析（源位深未知，编码器与源协商）时
+/// 回退「x264 自动 / NVENC 默认」。
 fn video_profile_options(
     config: &ConversionConfig,
     settings_disabled: bool,
+    metadata: Option<&SourceMetadata>,
 ) -> Vec<VideoSelectOption> {
     let is_nvenc = config.video_codec == "h264_nvenc";
     let selected = if is_nvenc {
@@ -1079,12 +1640,17 @@ fn video_profile_options(
         config.x264_profile.as_str()
     };
     // 8-bit 档位与 10-bit 像素格式互斥（实测 x264 `-profile high` × `yuv420p10le`
-    // 直接硬报错）⇒ 10-bit 下三档置灰，只留「跟随默认」（落到 High 10 档案）。
-    let eight_bit_blocked = frame_core::profile::is_ten_bit_pixel_format(&config.pixel_format);
+    // 直接硬报错）⇒ 10-bit 下三档置灰，只留「默认」（落到 High 10 档案）。
+    // 判据读「实际生效」的像素格式：HDR 生效 + `auto` 时链已落 10-bit，
+    // 按 `auto` 字面值判断会被骗过。
+    let eight_bit_blocked =
+        frame_core::profile::is_ten_bit_pixel_format(effective_pixel_format(config));
+    let default_caption = profile_landing_label(config, metadata)
+        .unwrap_or(if is_nvenc { "NVENC 默认" } else { "x264 自动" });
     let mut options = vec![VideoSelectOption {
         id: VIDEO_PROFILE_AUTO_OPTION_ID,
-        label: "跟随默认".to_string(),
-        caption: if is_nvenc { "NVENC 默认" } else { "x264 自动" }.to_string(),
+        label: "默认".to_string(),
+        caption: default_caption.to_string(),
         selected: selected.is_empty(),
         enabled: !settings_disabled,
     }];
@@ -1111,7 +1677,7 @@ fn settings_video_prores_profile_grid(
 ) -> gpui::Div {
     let mut grid = div().grid().grid_cols(4).gap_2();
     for (value, label) in [
-        ("", "跟随默认"),
+        ("", "默认"),
         ("proxy", "Proxy"),
         ("lt", "LT"),
         ("standard", "标准"),
@@ -1896,18 +2462,46 @@ mod tests {
 
     #[test]
     fn video_profile_options_list_the_four_h264_tiers() {
-        let options = video_profile_options(&config_with_codec("libx264"), false);
+        let options = video_profile_options(&config_with_codec("libx264"), false, None);
         let ids: Vec<&str> = options.iter().map(|option| option.id).collect();
         assert_eq!(ids, ["auto", "baseline", "main", "high"]);
-        assert!(options[0].selected, "未设档位时落在「跟随默认」");
+        assert!(options[0].selected, "未设档位时落在「默认」");
     }
 
     #[test]
-    fn video_profile_options_caption_follows_the_encoder_default() {
-        let x264 = video_profile_options(&config_with_codec("libx264"), false);
+    fn video_profile_options_caption_follows_the_resolved_landing() {
+        // 落点不可解析（无元数据，源位深未知）→ 回退编码器自身说法。
+        let x264 = video_profile_options(&config_with_codec("libx264"), false, None);
         assert_eq!(x264[0].caption, "x264 自动");
-        let nvenc = video_profile_options(&config_with_codec("h264_nvenc"), false);
+        let nvenc = video_profile_options(&config_with_codec("h264_nvenc"), false, None);
         assert_eq!(nvenc[0].caption, "NVENC 默认");
+
+        // 非 HDR + 源可探测（x264/NVENC 实测保持输入）→ 显化源落点档案名。
+        let source = SourceMetadata {
+            pixel_format: Some("yuv420p".to_string()),
+            ..SourceMetadata::default()
+        };
+        let x264 = video_profile_options(&config_with_codec("libx264"), false, Some(&source));
+        assert_eq!(x264[0].caption, "High");
+        let nvenc = video_profile_options(&config_with_codec("h264_nvenc"), false, Some(&source));
+        assert_eq!(nvenc[0].caption, "Main");
+
+        // HDR 生效 + 「自动」→ 链落 10-bit → High 10。
+        let hdr = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            ..ConversionConfig::default()
+        };
+        let options = video_profile_options(&hdr, false, None);
+        assert_eq!(options[0].caption, "High 10");
+
+        // 手选像素格式 → 落点同样可解析（8-bit 4:2:0 → High）。
+        let manual = ConversionConfig {
+            pixel_format: "yuv420p".to_string(),
+            ..ConversionConfig::default()
+        };
+        let options = video_profile_options(&manual, false, None);
+        assert_eq!(options[0].caption, "High");
     }
 
     #[test]
@@ -1918,7 +2512,7 @@ mod tests {
             x264_profile: "baseline".to_string(),
             ..ConversionConfig::default()
         };
-        let options = video_profile_options(&config, false);
+        let options = video_profile_options(&config, false, None);
         assert!(options[3].selected, "NVENC 读 nvenc_h264_profile");
         assert!(!options[1].selected, "不串用 x264 的档位");
     }
@@ -1929,17 +2523,31 @@ mod tests {
             pixel_format: "yuv420p10le".to_string(),
             ..ConversionConfig::default()
         };
-        let options = video_profile_options(&config, false);
-        assert!(options[0].enabled, "10-bit 下「跟随默认」仍可用");
+        let options = video_profile_options(&config, false, None);
+        assert!(options[0].enabled, "10-bit 下「默认」仍可用");
         assert!(
             options[1..].iter().all(|option| !option.enabled),
             "10-bit 与 8-bit 档位互斥，三档置灰"
+        );
+
+        // HDR 生效 + 「自动」：链实际落 10-bit（effective 解析），同样置灰——
+        // 判据不得被 `auto` 字面值骗过。
+        let hdr = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            ..ConversionConfig::default()
+        };
+        let options = video_profile_options(&hdr, false, None);
+        assert!(options[0].enabled);
+        assert!(
+            options[1..].iter().all(|option| !option.enabled),
+            "auto 在 HDR 下实际落 10-bit，8-bit 档位同样置灰"
         );
     }
 
     #[test]
     fn video_profile_options_disable_every_tier_while_locked() {
-        let options = video_profile_options(&config_with_codec("libx264"), true);
+        let options = video_profile_options(&config_with_codec("libx264"), true, None);
         assert!(options.iter().all(|option| !option.enabled));
     }
 

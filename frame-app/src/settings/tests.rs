@@ -202,6 +202,76 @@ mod output_options {
     }
 
     #[test]
+    fn initialize_output_config_detects_hdr_source_kinds() {
+        let probe = |dolby_vision: bool, color_transfer: Option<&str>| SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            dolby_vision,
+            color_transfer: color_transfer.map(str::to_string),
+            ..SourceMetadata::default()
+        };
+
+        // PQ / HLG → 推导源类型 + 自动勾选转换。
+        let mut pq = ConversionConfig::default();
+        assert!(initialize_output_config(
+            &mut pq,
+            Some(&probe(false, Some("smpte2084")))
+        ));
+        assert_eq!(pq.hdr_source_kind, "pq");
+        assert!(pq.hdr_conversion_enabled);
+
+        let mut hlg = ConversionConfig::default();
+        initialize_output_config(&mut hlg, Some(&probe(false, Some("arib-std-b67"))));
+        assert_eq!(hlg.hdr_source_kind, "hlg");
+        assert!(hlg.hdr_conversion_enabled);
+
+        // DV 优先于传输特性（Profile 8 兼容基础层传输特性同样是 PQ）——只警告不转换。
+        let mut dv = ConversionConfig::default();
+        initialize_output_config(&mut dv, Some(&probe(true, Some("smpte2084"))));
+        assert_eq!(dv.hdr_source_kind, "dv");
+        assert!(!dv.hdr_conversion_enabled);
+
+        // SDR → 全默认值下无变化（不勾选、类型落 sdr）。
+        let mut sdr = ConversionConfig::default();
+        assert!(!initialize_output_config(
+            &mut sdr,
+            Some(&probe(false, Some("bt709")))
+        ));
+        assert_eq!(sdr.hdr_source_kind, "sdr");
+        assert!(!sdr.hdr_conversion_enabled);
+    }
+
+    #[test]
+    fn initialize_output_config_keeps_auto_pixel_format_on_hdr_detection() {
+        // 探测写入先于归一化，但 HDR 联动不再写回像素格式：「自动」保持字面值，
+        // 实际落点由 `effective_pixel_format` 在链尾/参数层/展示层统一解析
+        // （导入即显示具体值会让「用户值 vs 联动值」失去区分）。
+        let pq = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            color_transfer: Some("smpte2084".to_string()),
+            ..SourceMetadata::default()
+        };
+        let mut config = ConversionConfig::default();
+        assert_eq!(config.pixel_format, DEFAULT_PIXEL_FORMAT);
+
+        initialize_output_config(&mut config, Some(&pq));
+
+        assert!(config.hdr_conversion_enabled, "PQ 源自动勾选转换");
+        assert_eq!(config.pixel_format, DEFAULT_PIXEL_FORMAT);
+
+        // DV 不勾选 → 像素格式同样保持「自动」。
+        let dv = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            dolby_vision: true,
+            color_transfer: Some("smpte2084".to_string()),
+            ..SourceMetadata::default()
+        };
+        let mut dv_config = ConversionConfig::default();
+        initialize_output_config(&mut dv_config, Some(&dv));
+
+        assert_eq!(dv_config.pixel_format, DEFAULT_PIXEL_FORMAT);
+    }
+
+    #[test]
     fn output_container_options_disable_video_targets_for_audio_sources() {
         let options = output_container_options(
             &ConversionConfig::default(),
@@ -1541,6 +1611,32 @@ mod video_options {
     }
 
     #[test]
+    fn video_pixel_format_auto_caption_follows_context() {
+        // HDR 生效 → 下拉「自动」备注显化链落点。
+        let hdr = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            ..ConversionConfig::default()
+        };
+        let options = video_pixel_format_options(&hdr, None);
+        assert_eq!(options[0].id, "auto");
+        assert_eq!(options[0].caption, "YUV 4:2:0 (10-bit)");
+
+        // 非 HDR + 无元数据 → 回退「编码器默认」。
+        let options = video_pixel_format_options(&ConversionConfig::default(), None);
+        assert_eq!(options[0].id, "auto");
+        assert_eq!(options[0].caption, "编码器默认");
+
+        // 非 HDR + 源可探测（x264 实测保持输入）→ 显化源落点。
+        let metadata = SourceMetadata {
+            pixel_format: Some("yuv420p".to_string()),
+            ..SourceMetadata::default()
+        };
+        let options = video_pixel_format_options(&ConversionConfig::default(), Some(&metadata));
+        assert_eq!(options[0].caption, "YUV 4:2:0 (8-bit)");
+    }
+
+    #[test]
     fn apply_video_codec_rejects_container_incompatible_codec() {
         let mut config = ConversionConfig {
             container: "webm".to_string(),
@@ -1583,6 +1679,75 @@ mod video_options {
     }
 
     #[test]
+    fn normalize_video_config_keeps_auto_pixel_format_under_hdr() {
+        // 落点不再写回配置：libx264 / h264_nvenc / mpegts 各场景都保持「自动」，
+        // 实际落点由 `effective_pixel_format` 统一解析（core 侧测试覆盖白名单分支）。
+        let cases = [
+            ConversionConfig {
+                hdr_conversion_enabled: true,
+                hdr_source_kind: "pq".to_string(),
+                ..ConversionConfig::default()
+            },
+            ConversionConfig {
+                hdr_conversion_enabled: true,
+                hdr_source_kind: "pq".to_string(),
+                video_codec: "h264_nvenc".to_string(),
+                ..ConversionConfig::default()
+            },
+            ConversionConfig {
+                container: "mpegts".to_string(),
+                hdr_conversion_enabled: true,
+                hdr_source_kind: "pq".to_string(),
+                ..ConversionConfig::default()
+            },
+        ];
+        for mut config in cases {
+            normalize_video_config(&mut config, None);
+            assert_eq!(config.pixel_format, "auto");
+        }
+    }
+
+    #[test]
+    fn normalize_video_config_keeps_manual_pixel_format_under_hdr() {
+        let mut config = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            pixel_format: "yuv420p".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        normalize_video_config(&mut config, None);
+
+        assert_eq!(config.pixel_format, "yuv420p");
+    }
+
+    #[test]
+    fn normalize_video_config_leaves_pixel_format_alone_when_hdr_inactive() {
+        let mut config = ConversionConfig {
+            hdr_source_kind: "pq".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        normalize_video_config(&mut config, None);
+
+        assert_eq!(config.pixel_format, "auto");
+    }
+
+    #[test]
+    fn normalize_video_config_keeps_auto_pixel_format_for_gif_output() {
+        let mut config = ConversionConfig {
+            container: "gif".to_string(),
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        normalize_video_config(&mut config, None);
+
+        assert_eq!(config.pixel_format, "auto");
+    }
+
+    #[test]
     fn normalize_video_config_resets_visual_filters_in_copy_mode() {
         let mut config = ConversionConfig {
             processing_mode: ProcessingMode::Copy,
@@ -1608,6 +1773,74 @@ mod video_options {
         assert!(apply_gif_loop(&mut config, "999999x"));
 
         assert_eq!(config.gif_loop, 65_535);
+    }
+
+    #[test]
+    fn hdr_tonemap_algorithm_options_list_the_zscale_chain_set() {
+        let options = hdr_tonemap_algorithm_options(&ConversionConfig::default(), false);
+        let ids: Vec<&str> = options.iter().map(|option| option.id).collect();
+
+        assert_eq!(ids, ["hable", "mobius", "reinhard", "clip", "linear", "gamma"]);
+        assert!(options[0].is_selected, "默认档落在 Hable");
+        assert!(options.iter().all(|option| !option.is_disabled));
+    }
+
+    #[test]
+    fn hdr_tonemap_algorithm_options_follow_config_and_lock() {
+        let config = ConversionConfig {
+            hdr_tonemap_algorithm: "mobius".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        let selected = hdr_tonemap_algorithm_options(&config, false)
+            .into_iter()
+            .find(|option| option.is_selected)
+            .map(|option| (option.id, option.label));
+
+        assert_eq!(selected, Some(("mobius", "Mobius")), "显示名走 label 映射");
+
+        let locked = hdr_tonemap_algorithm_options(&config, true);
+        assert!(locked.iter().all(|option| option.is_disabled), "锁定态全灰");
+    }
+
+    #[test]
+    fn hdr_source_peak_options_switch_on_the_presence_of_the_peak_value() {
+        let auto = hdr_source_peak_options(&ConversionConfig::default(), false);
+        let ids: Vec<&str> = auto.iter().map(|option| option.id).collect();
+        assert_eq!(ids, ["auto", "manual"]);
+        assert!(auto[0].is_selected, "无峰值 → 自动档选中");
+
+        let manual_config = ConversionConfig {
+            hdr_source_peak: Some(1200),
+            ..ConversionConfig::default()
+        };
+        let manual = hdr_source_peak_options(&manual_config, false);
+        assert!(manual[1].is_selected, "有峰值 → 手动档选中");
+        assert!(!manual[0].is_selected);
+    }
+
+    #[test]
+    fn hdr_source_override_options_expose_the_four_fallbacks() {
+        let options = hdr_source_override_options(&ConversionConfig::default(), false);
+        let ids: Vec<&str> = options.iter().map(|option| option.id).collect();
+        assert_eq!(ids, ["auto", "force_pq", "force_hlg", "treat_as_sdr"]);
+        assert!(options[0].is_selected);
+        assert_eq!(options[1].label, "强制 PQ");
+        assert_eq!(options[2].label, "强制 HLG");
+        assert_eq!(options[3].label, "视为 SDR");
+
+        let config = ConversionConfig {
+            hdr_source_override: "treat_as_sdr".to_string(),
+            ..ConversionConfig::default()
+        };
+        let selected = hdr_source_override_options(&config, false)
+            .into_iter()
+            .find(|option| option.is_selected)
+            .map(|option| option.id);
+        assert_eq!(selected, Some("treat_as_sdr"));
+
+        let locked = hdr_source_override_options(&config, true);
+        assert!(locked.iter().all(|option| option.is_disabled), "锁定态全灰");
     }
 }
 
@@ -2010,6 +2243,35 @@ mod source_info_sections {
                 ],
             }]
         );
+    }
+
+    #[test]
+    fn source_info_sections_render_color_transfer_row_for_hdr_sources() {
+        let metadata = SourceMetadata {
+            media_kind: Some(SourceKind::Video),
+            video_codec: Some("hevc".to_string()),
+            color_transfer: Some("smpte2084".to_string()),
+            ..SourceMetadata::default()
+        };
+
+        let sections = source_info_sections(&metadata);
+
+        let SourceInfoSection::Rows { rows, .. } = &sections[0] else {
+            panic!("expected rows section for video metadata");
+        };
+        assert_eq!(row_value(rows, "传输特性"), Some("PQ (smpte2084)"));
+    }
+
+    #[test]
+    fn format_source_transfer_maps_pq_and_hlg_keeps_raw_for_others() {
+        assert_eq!(format_source_transfer(Some("smpte2084")), "PQ (smpte2084)");
+        assert_eq!(
+            format_source_transfer(Some("arib-std-b67")),
+            "HLG (arib-std-b67)"
+        );
+        assert_eq!(format_source_transfer(Some("bt709")), "bt709");
+        assert_eq!(format_source_transfer(Some("  ")), "—");
+        assert_eq!(format_source_transfer(None), "—");
     }
 
     #[test]
@@ -2734,7 +2996,7 @@ mod profile {
         assert!(apply_x264_profile(&mut x264, "High"), "大小写归一化后接受");
         assert_eq!(x264.x264_profile, "high");
         assert!(!apply_x264_profile(&mut x264, "high10"), "10-bit 档位不提供");
-        assert!(apply_x264_profile(&mut x264, ""), "空串＝回落跟随默认");
+        assert!(apply_x264_profile(&mut x264, ""), "空串＝回落默认");
 
         let mut nvenc = config("h264_nvenc", "mp4");
         assert!(!apply_x264_profile(&mut nvenc, "high"), "x264 档位只在 libx264 下可改");
@@ -2756,6 +3018,55 @@ mod profile {
         assert!(
             !apply_x264_profile(&mut config, "high"),
             "10-bit 像素格式下拒设 8-bit 档位（实测 x264 会硬报错）"
+        );
+    }
+
+    #[test]
+    fn hdr_auto_pixel_format_guards_x264_profile_end_to_end() {
+        // HDR 生效 + 「自动」：实际落 10-bit（effective 解析）→
+        // ① 归一化时残留的 8-bit 档位回落；② 拒设入口同样拦截。
+        let mut config = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            x264_profile: "high".to_string(),
+            ..ConversionConfig::default()
+        };
+
+        normalize_video_config(&mut config, None);
+
+        assert_eq!(config.pixel_format, "auto");
+        assert_eq!(config.x264_profile, "", "链落 10-bit，8-bit 档位回落");
+        assert!(
+            !apply_x264_profile(&mut config, "high"),
+            "HDR 落 10-bit 时拒设 8-bit 档位"
+        );
+
+        // 关闭 HDR 后「自动」不可解析为 10-bit → 档位恢复可设。
+        config.hdr_conversion_enabled = false;
+        assert!(apply_x264_profile(&mut config, "high"));
+    }
+
+    #[test]
+    fn switching_pixel_format_to_auto_reconciles_profile_under_hdr() {
+        // HDR 生效下从 8-bit 手动切回「自动」：实际落点仍是 10-bit，
+        // 与 8-bit 档位冲突 → 档位回落（reconcile 读 effective，而非 auto 字面值）。
+        let mut config = ConversionConfig {
+            hdr_conversion_enabled: true,
+            hdr_source_kind: "pq".to_string(),
+            pixel_format: "yuv420p".to_string(),
+            ..ConversionConfig::default()
+        };
+        assert!(
+            apply_x264_profile(&mut config, "high"),
+            "8-bit 像素格式下档位可设"
+        );
+
+        assert!(apply_pixel_format(&mut config, "auto"));
+
+        assert_eq!(config.pixel_format, "auto");
+        assert_eq!(
+            config.x264_profile, "",
+            "auto 在 HDR 下实际落 10-bit，档位回落"
         );
     }
 

@@ -124,7 +124,8 @@ use crate::{
         apply_audio_quality, apply_audio_volume, apply_crf, apply_custom_height,
         apply_custom_width, apply_external_subtitle_default, apply_external_subtitle_forced,
         apply_external_subtitle_language, apply_external_subtitle_title,
-        apply_gif_colors, apply_gif_dither, apply_gif_loop, apply_hw_decode,
+        apply_gif_colors, apply_gif_dither, apply_gif_loop, apply_hdr_source_peak,
+        apply_hw_decode,
         apply_image_jpeg_huffman, apply_image_jpeg_quality, apply_image_png_compression,
         apply_image_png_prediction, apply_image_tiff_compression, apply_image_webp_compression,
         apply_image_webp_lossless, apply_image_webp_preset, apply_image_webp_quality,
@@ -362,9 +363,20 @@ struct SettingsUiState {
     video_fps_select_scroll: ScrollHandle,
     video_profile_select_popover: PopoverState,
     video_profile_select_scroll: ScrollHandle,
+    video_tonemap_algorithm_select_popover: PopoverState,
+    video_tonemap_algorithm_select_scroll: ScrollHandle,
+    video_source_peak_select_popover: PopoverState,
+    video_source_peak_select_scroll: ScrollHandle,
+    video_source_override_select_popover: PopoverState,
+    video_source_override_select_scroll: ScrollHandle,
+    /// 色彩管理模块「高级」子折叠是否展开（默认收起；换文件时随色彩管理一并回默认）。
+    hdr_advanced_expanded: bool,
+    /// 色彩管理整块是否展开（HDR 系默认展开、可手动收成一行；非 HDR 系恒平铺不看此位；
+    /// 换文件与「覆盖救回」翻转进 HDR 系时回默认展开——收起不跨文件粘滞）。
+    hdr_section_expanded: bool,
     /// Popover placement anchor (window-space mouse y at last hover), one slot
     /// per video select row; frozen while that row's popover is not Hidden.
-    video_select_anchor_y: [Option<f32>; 7],
+    video_select_anchor_y: [Option<f32>; 10],
     audio_codec_select_popover: PopoverState,
     audio_codec_select_scroll: ScrollHandle,
     audio_bitrate_select_popover: PopoverState,
@@ -503,7 +515,15 @@ impl Default for SettingsUiState {
             video_fps_select_scroll: ScrollHandle::new(),
             video_profile_select_popover: PopoverState::Hidden,
             video_profile_select_scroll: ScrollHandle::new(),
-            video_select_anchor_y: [None; 7],
+            video_tonemap_algorithm_select_popover: PopoverState::Hidden,
+            video_tonemap_algorithm_select_scroll: ScrollHandle::new(),
+            video_source_peak_select_popover: PopoverState::Hidden,
+            video_source_peak_select_scroll: ScrollHandle::new(),
+            video_source_override_select_popover: PopoverState::Hidden,
+            video_source_override_select_scroll: ScrollHandle::new(),
+            hdr_advanced_expanded: false,
+            hdr_section_expanded: true,
+            video_select_anchor_y: [None; 10],
             audio_codec_select_popover: PopoverState::Hidden,
             audio_codec_select_scroll: ScrollHandle::new(),
             audio_bitrate_select_popover: PopoverState::Hidden,
@@ -553,6 +573,10 @@ impl Default for SubtitleUiState {
     }
 }
 
+#[expect(
+    clippy::struct_excessive_bools,
+    reason = "Preview runtime state collects independent tool modes and playback flags verbatim."
+)]
 struct PreviewUiState {
     canvas_file_id: Option<String>,
     canvas: PreviewCanvasState,
@@ -563,6 +587,9 @@ struct PreviewUiState {
     draft_crop: Option<CropRect>,
     crop_aspect: String,
     crop_drag: Option<PreviewCropDragState>,
+    hdr_compare_file_id: Option<String>,
+    /// 「原片 / 映射后」对比态：true = 预览临时绕过映射段显示源画面。
+    hdr_preview_bypass: bool,
     overlay_file_id: Option<String>,
     overlay: PreviewOverlayState,
     overlay_dimensions_key: Option<String>,
@@ -601,6 +628,8 @@ impl Default for PreviewUiState {
             draft_crop: None,
             crop_aspect: "free".to_string(),
             crop_drag: None,
+            hdr_compare_file_id: None,
+            hdr_preview_bypass: false,
             overlay_file_id: None,
             overlay: PreviewOverlayState::new(),
             overlay_dimensions_key: None,
@@ -910,6 +939,8 @@ struct SettingsRenderState<'a> {
     bitrate_window_popover: PopoverState,
     bitrate_analysis: &'a BitrateAnalysisEntry,
     settings_disabled: bool,
+    hdr_advanced_expanded: bool,
+    hdr_section_expanded: bool,
     output_name: &'a str,
     output_name_focus: Option<&'a FocusHandle>,
     video_width_focus: Option<&'a FocusHandle>,
@@ -923,6 +954,7 @@ struct SettingsRenderState<'a> {
     video_x265_rd_level_focus: Option<&'a FocusHandle>,
     video_x265_rdoq_level_focus: Option<&'a FocusHandle>,
     gif_loop_focus: Option<&'a FocusHandle>,
+    video_hdr_source_peak_focus: Option<&'a FocusHandle>,
     video_pixel_format_select: SettingsVideoSelectUi<'a>,
     video_codec_select: SettingsVideoSelectUi<'a>,
     video_preset_select: SettingsVideoSelectUi<'a>,
@@ -930,6 +962,9 @@ struct SettingsRenderState<'a> {
     video_scaling_select: SettingsVideoSelectUi<'a>,
     video_fps_select: SettingsVideoSelectUi<'a>,
     video_profile_select: SettingsVideoSelectUi<'a>,
+    video_tonemap_algorithm_select: SettingsVideoSelectUi<'a>,
+    video_source_peak_select: SettingsVideoSelectUi<'a>,
+    video_source_override_select: SettingsVideoSelectUi<'a>,
     audio_codec_select: SettingsVideoSelectUi<'a>,
     audio_bitrate_select: SettingsVideoSelectUi<'a>,
     audio_sample_rate_select: SettingsVideoSelectUi<'a>,
@@ -973,6 +1008,7 @@ struct SettingsVideoInputFocuses<'a> {
     x265_rd_level: Option<&'a FocusHandle>,
     x265_rdoq_level: Option<&'a FocusHandle>,
     gif_loop: Option<&'a FocusHandle>,
+    hdr_source_peak: Option<&'a FocusHandle>,
 }
 
 #[derive(Clone, Copy)]

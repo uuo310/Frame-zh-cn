@@ -28,6 +28,7 @@ pub(super) fn sanitize_replacement_text(kind: FrameTextInputKind, value: &str) -
         | FrameTextInputKind::VideoBitrate
         | FrameTextInputKind::VideoMaxrate
         | FrameTextInputKind::VideoBufsize
+        | FrameTextInputKind::VideoHdrSourcePeak
         | FrameTextInputKind::GifLoop => sanitize_number_input(value),
         FrameTextInputKind::VideoX264PsyRd
         | FrameTextInputKind::VideoX265PsyRd

@@ -31,6 +31,10 @@ pub(in crate::app) struct PreviewShellState {
     pub(in crate::app) canvas: PreviewCanvasRenderState,
     pub(in crate::app) crop: PreviewCropRenderState,
     pub(in crate::app) overlay: PreviewOverlayRenderState,
+    /// 「原片 / 映射后」对比开关：映射段实际生效（勾选且可操作）才可用。
+    pub(in crate::app) hdr_compare_available: bool,
+    /// 当前是否处于「原片」对照态（按钮选中高亮）。
+    pub(in crate::app) hdr_compare_source_active: bool,
     pub(in crate::app) presentation: PreviewRenderPresentation,
     pub(in crate::app) media: Option<PreviewMediaRenderState>,
     pub(in crate::app) render_image: Option<Arc<RenderImage>>,
@@ -117,6 +121,7 @@ pub(in crate::app) struct PreviewPanelProps<'a> {
     pub(in crate::app) canvas: PreviewCanvasRenderState,
     pub(in crate::app) crop: PreviewCropRenderState,
     pub(in crate::app) overlay: PreviewOverlayRenderState,
+    pub(in crate::app) hdr_compare_source_active: bool,
     pub(in crate::app) viewport_focuses: PreviewViewportFocuses<'a>,
     pub(in crate::app) timecode_focuses: PreviewTimecodeInputFocuses<'a>,
     pub(in crate::app) playback: PreviewPlaybackState,
@@ -156,6 +161,7 @@ pub(in crate::app) struct PreviewShellStateInput<'a> {
     pub(in crate::app) settings: &'a SettingsRenderState<'a>,
     pub(in crate::app) crop: PreviewCropRenderState,
     pub(in crate::app) overlay: PreviewOverlayRenderState,
+    pub(in crate::app) hdr_compare_source_active: bool,
     pub(in crate::app) canvas: PreviewCanvasRenderState,
     pub(in crate::app) playback: PreviewPlaybackState,
     pub(in crate::app) presentation: PreviewRenderPresentation,
@@ -176,6 +182,7 @@ pub(in crate::app) fn preview_panel(
         settings,
         crop: props.crop,
         overlay: props.overlay,
+        hdr_compare_source_active: props.hdr_compare_source_active,
         canvas: props.canvas,
         playback: props.playback,
         presentation: props.presentation,
@@ -199,6 +206,7 @@ pub(in crate::app) fn preview_shell_state(input: PreviewShellStateInput<'_>) -> 
         settings,
         crop,
         overlay,
+        hdr_compare_source_active,
         canvas,
         playback,
         presentation,
@@ -216,6 +224,8 @@ pub(in crate::app) fn preview_shell_state(input: PreviewShellStateInput<'_>) -> 
         container: Some(settings.config.container.as_str()),
     });
     let duration_seconds = preview_duration_seconds(settings.metadata);
+    // 与滤镜链同判据（core 三层组合的 app 侧封装）：映射段实际生效才有对比意义。
+    let hdr_compare_available = crate::settings::hdr_toggle_checked(settings.config);
     PreviewShellState {
         tooltip_visible_id: settings.tooltip_visible_id.map(str::to_string),
         palette: settings.palette,
@@ -229,6 +239,8 @@ pub(in crate::app) fn preview_shell_state(input: PreviewShellStateInput<'_>) -> 
         canvas,
         crop,
         overlay,
+        hdr_compare_available,
+        hdr_compare_source_active,
         presentation,
         media,
         render_image,

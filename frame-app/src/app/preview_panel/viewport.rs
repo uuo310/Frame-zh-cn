@@ -809,6 +809,8 @@ mod tests {
                 overlay: None,
                 image_dimensions: None,
             },
+            hdr_compare_available: false,
+            hdr_compare_source_active: false,
             presentation: PreviewRenderPresentation::default(),
             media: None,
             render_image: None,

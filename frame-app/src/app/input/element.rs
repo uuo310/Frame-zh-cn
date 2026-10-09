@@ -5,7 +5,7 @@ pub(super) struct FrameTextInputElement {
     kind: FrameTextInputKind,
     placeholder: SharedString,
     disabled: bool,
-    /// 占位提示再淡一档（psy 字段的「默认值（跟随默认）」）；不影响真实输入值。
+    /// 占位提示再淡一档（psy 字段的「2.0（默认）」）；不影响真实输入值。
     dimmed_placeholder: bool,
     focus_handle: FocusHandle,
     palette: &'static theme::ThemePalette,
@@ -254,7 +254,7 @@ pub(in crate::app) struct FrameTextInputSpec<'a> {
 /// 元数据页提示（占位）文字字号（设计像素）：比常规输入文字小一号；仅提示，输入值不变。单行常数逐轮微调。
 const METADATA_HINT_TEXT_SIZE_PX: f32 = 11.0;
 
-/// 提示型占位（psy 的「默认值（跟随默认）」）在常规占位灰度上的再降档系数。单行常数逐轮微调。
+/// 提示型占位（psy 的「2.0（默认）」）在常规占位灰度上的再降档系数。单行常数逐轮微调。
 const PLACEHOLDER_HINT_ALPHA_FACTOR: f32 = 0.72;
 
 /// 禁用（灰置）态输入框整体透明度。单行常数逐轮微调。

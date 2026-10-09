@@ -281,7 +281,11 @@ pub struct ProbeMetadata {
     pub color_space: Option<String>,
     pub color_range: Option<String>,
     pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
     pub profile: Option<String>,
+    /// 源含 Dolby Vision 配置记录（DOVI side data）——只警告不转换。
+    #[serde(default)]
+    pub dolby_vision: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub video_stream_index: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -297,6 +301,21 @@ pub struct TransportStreamMetadata {
     pub service_name: Option<String>,
     pub service_provider: Option<String>,
 }
+
+/// HDR→SDR 映射算法全集（zscale 链 tonemap 选项，无 BT.2390）。
+pub const HDR_TONEMAP_ALGORITHMS: [&str; 6] = [
+    "hable",
+    "mobius",
+    "reinhard",
+    "clip",
+    "linear",
+    "gamma",
+];
+/// 源类型覆盖选项全集（错标源兜底）。
+pub const HDR_SOURCE_OVERRIDES: [&str; 4] = ["auto", "force_pq", "force_hlg", "treat_as_sdr"];
+/// 源峰值亮度允许范围（nit）。
+pub const HDR_PEAK_MIN_NIT: u32 = 100;
+pub const HDR_PEAK_MAX_NIT: u32 = 10_000;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -429,6 +448,21 @@ pub struct ConversionConfig {
     pub hw_decode: bool,
     #[serde(default = "default_pixel_format")]
     pub pixel_format: String,
+    /// HDR→SDR 色彩管理：启用转换（应用层检测到 PQ/HLG 时自动置真，用户可手动双向覆盖）。
+    #[serde(default)]
+    pub hdr_conversion_enabled: bool,
+    /// 映射算法（`tonemap=tonemap=`）：见 [`HDR_TONEMAP_ALGORITHMS`]。
+    #[serde(default = "default_hdr_tonemap_algorithm")]
+    pub hdr_tonemap_algorithm: String,
+    /// 源峰值亮度（nit，100–10000）：`None`＝自动（不传 `tonemap=peak`，由 ffmpeg 按 MaxCLL/母带亮度推算）。
+    #[serde(default)]
+    pub hdr_source_peak: Option<u32>,
+    /// 源类型覆盖：见 [`HDR_SOURCE_OVERRIDES`]（错标源兜底）。
+    #[serde(default = "default_hdr_source_override")]
+    pub hdr_source_override: String,
+    /// 源传输特性探测结果：`sdr` / `pq` / `hlg`（应用层从探测元数据填充）。
+    #[serde(default = "default_hdr_source_kind")]
+    pub hdr_source_kind: String,
     #[serde(default = "default_image_jpeg_quality")]
     pub image_jpeg_quality: u32,
     #[serde(default = "default_image_jpeg_huffman")]
@@ -497,6 +531,18 @@ const fn default_hw_decode() -> bool {
 
 fn default_pixel_format() -> String {
     "auto".to_string()
+}
+
+fn default_hdr_tonemap_algorithm() -> String {
+    "hable".to_string()
+}
+
+fn default_hdr_source_override() -> String {
+    "auto".to_string()
+}
+
+fn default_hdr_source_kind() -> String {
+    "sdr".to_string()
 }
 
 const fn default_image_jpeg_quality() -> u32 {
@@ -663,6 +709,7 @@ pub struct FfprobeStream {
     pub color_space: Option<String>,
     pub color_range: Option<String>,
     pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
     pub profile: Option<String>,
     pub sample_rate: Option<String>,
     pub ts_packetsize: Option<String>,
@@ -672,6 +719,8 @@ pub struct FfprobeStream {
 
 #[derive(Deserialize)]
 pub struct FfprobeSideData {
+    /// side-data 类型名（如 `Display Matrix`、`DOVI configuration record`）。
+    pub side_data_type: Option<String>,
     pub rotation: Option<f64>,
 }
 

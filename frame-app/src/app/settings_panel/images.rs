@@ -146,7 +146,7 @@ fn settings_images_pixel_format_section(
     cx: &mut Context<FrameRoot>,
 ) -> gpui::Div {
     let mut list = div().grid().grid_cols(1);
-    for option in video_pixel_format_options(config) {
+    for option in video_pixel_format_options(config, None) {
         let pixel_format = option.id;
         let enabled = !settings_disabled && !option.is_disabled;
         list = list.child(

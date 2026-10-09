@@ -15,14 +15,15 @@ use super::{
 };
 use crate::SETTINGS_CONTROL_HEIGHT;
 use crate::settings::{
-    apply_fps, apply_nvenc_h264_profile, apply_pixel_format, apply_resolution,
-    apply_scaling_algorithm, apply_video_codec, apply_video_preset, apply_x264_profile,
+    apply_fps, apply_hdr_source_override, apply_hdr_source_peak_mode, apply_hdr_tonemap_algorithm,
+    apply_nvenc_h264_profile, apply_pixel_format, apply_resolution, apply_scaling_algorithm,
+    apply_video_codec, apply_video_preset, apply_x264_profile,
 };
 use gpui::{FocusHandle, relative};
 
 pub(in crate::app) const VIDEO_SELECT_TRIGGER_WIDTH_RATIO: f32 = 0.75;
 pub(in crate::app) const VIDEO_SELECT_LABEL_COLUMN_WIDTH: f32 = 64.0;
-/// 「跟随默认」档的 option id。该档的值本身是空串，但 option id 会被拼进 DOM id
+/// 「默认」档的 option id。该档的值本身是空串，但 option id 会被拼进 DOM id
 /// （`{control_id}-option-{id}`），空串会留下悬空后缀 ⇒ 用具名 id，提交时映射回空串。
 pub(in crate::app) const VIDEO_PROFILE_AUTO_OPTION_ID: &str = "auto";
 const VIDEO_SELECT_POPOVER_GAP: f32 = 4.0;
@@ -44,6 +45,9 @@ pub(in crate::app) enum VideoSelectId {
     Scaling,
     Fps,
     Profile,
+    TonemapAlgorithm,
+    SourcePeak,
+    SourceOverride,
 }
 
 pub(in crate::app) const ALL_VIDEO_SELECTS: &[VideoSelectId] = &[
@@ -54,6 +58,9 @@ pub(in crate::app) const ALL_VIDEO_SELECTS: &[VideoSelectId] = &[
     VideoSelectId::Scaling,
     VideoSelectId::Fps,
     VideoSelectId::Profile,
+    VideoSelectId::TonemapAlgorithm,
+    VideoSelectId::SourcePeak,
+    VideoSelectId::SourceOverride,
 ];
 
 impl VideoSelectId {
@@ -67,6 +74,9 @@ impl VideoSelectId {
             Self::Scaling => 4,
             Self::Fps => 5,
             Self::Profile => 6,
+            Self::TonemapAlgorithm => 7,
+            Self::SourcePeak => 8,
+            Self::SourceOverride => 9,
         }
     }
 
@@ -79,6 +89,9 @@ impl VideoSelectId {
             Self::Scaling => "video-scaling-select",
             Self::Fps => "video-fps-select",
             Self::Profile => "video-profile-select",
+            Self::TonemapAlgorithm => "video-tonemap-algorithm-select",
+            Self::SourcePeak => "video-source-peak-select",
+            Self::SourceOverride => "video-source-override-select",
         }
     }
 
@@ -91,6 +104,9 @@ impl VideoSelectId {
             Self::Scaling => "video-scaling-select-options",
             Self::Fps => "video-fps-select-options",
             Self::Profile => "video-profile-select-options",
+            Self::TonemapAlgorithm => "video-tonemap-algorithm-select-options",
+            Self::SourcePeak => "video-source-peak-select-options",
+            Self::SourceOverride => "video-source-override-select-options",
         }
     }
 
@@ -103,6 +119,9 @@ impl VideoSelectId {
             Self::Scaling => "video-scaling-select-options-list",
             Self::Fps => "video-fps-select-options-list",
             Self::Profile => "video-profile-select-options-list",
+            Self::TonemapAlgorithm => "video-tonemap-algorithm-select-options-list",
+            Self::SourcePeak => "video-source-peak-select-options-list",
+            Self::SourceOverride => "video-source-override-select-options-list",
         }
     }
 
@@ -115,6 +134,9 @@ impl VideoSelectId {
             Self::Scaling => "video-scaling-select-options-scrollbar",
             Self::Fps => "video-fps-select-options-scrollbar",
             Self::Profile => "video-profile-select-options-scrollbar",
+            Self::TonemapAlgorithm => "video-tonemap-algorithm-select-options-scrollbar",
+            Self::SourcePeak => "video-source-peak-select-options-scrollbar",
+            Self::SourceOverride => "video-source-override-select-options-scrollbar",
         }
     }
 
@@ -127,6 +149,9 @@ impl VideoSelectId {
             Self::Scaling => "settings-video-scaling-select-motion",
             Self::Fps => "settings-video-fps-select-motion",
             Self::Profile => "settings-video-profile-select-motion",
+            Self::TonemapAlgorithm => "settings-video-tonemap-algorithm-select-motion",
+            Self::SourcePeak => "settings-video-source-peak-select-motion",
+            Self::SourceOverride => "settings-video-source-override-select-motion",
         }
     }
 
@@ -139,6 +164,9 @@ impl VideoSelectId {
             Self::Scaling => "video-scaling-select-label",
             Self::Fps => "video-fps-select-label",
             Self::Profile => "video-profile-select-label",
+            Self::TonemapAlgorithm => "video-tonemap-algorithm-select-label",
+            Self::SourcePeak => "video-source-peak-select-label",
+            Self::SourceOverride => "video-source-override-select-label",
         }
     }
 
@@ -151,6 +179,9 @@ impl VideoSelectId {
             Self::Scaling => "缩放算法",
             Self::Fps => "帧率",
             Self::Profile => "编码兼容性",
+            Self::TonemapAlgorithm => "映射算法",
+            Self::SourcePeak => "源峰值亮度",
+            Self::SourceOverride => "源类型覆盖",
         }
     }
 
@@ -162,7 +193,10 @@ impl VideoSelectId {
             | Self::Resolution
             | Self::Scaling
             | Self::Fps
-            | Self::Profile => None,
+            | Self::Profile
+            | Self::TonemapAlgorithm
+            | Self::SourcePeak
+            | Self::SourceOverride => None,
         }
     }
 }
@@ -180,7 +214,8 @@ pub(in crate::app) struct VideoSelectRowState<'a> {
     pub(in crate::app) id: VideoSelectId,
     pub(in crate::app) options: Vec<VideoSelectOption>,
     pub(in crate::app) selected_label: String,
-    /// 触发器值的尾随小字（如 分辨率「原始 3840×2160」）；仅分辨率/帧率行按需传入。
+    /// 触发器值的尾随小字（如 分辨率「原始 3840×2160」、像素格式「自动（YUV 4:2:0
+    /// (10-bit)）」）；落点需推断的行按需传入，值本身自明的行不传。
     pub(in crate::app) value_suffix: Option<String>,
     pub(in crate::app) enabled: bool,
     pub(in crate::app) tooltip_visible_id: Option<&'a str>,
@@ -388,7 +423,8 @@ pub(in crate::app) fn video_select_row(
                         if !option_enabled {
                             return;
                         }
-                        if root.commit_video_select(id, option_id) {
+                        let changed = root.commit_video_select(id, option_id);
+                        if changed {
                             cx.notify();
                         }
                     }))
@@ -588,6 +624,11 @@ impl FrameRoot {
             VideoSelectId::Scaling => self.settings_ui.video_scaling_select_popover,
             VideoSelectId::Fps => self.settings_ui.video_fps_select_popover,
             VideoSelectId::Profile => self.settings_ui.video_profile_select_popover,
+            VideoSelectId::TonemapAlgorithm => {
+                self.settings_ui.video_tonemap_algorithm_select_popover
+            }
+            VideoSelectId::SourcePeak => self.settings_ui.video_source_peak_select_popover,
+            VideoSelectId::SourceOverride => self.settings_ui.video_source_override_select_popover,
         }
     }
 
@@ -617,6 +658,13 @@ impl FrameRoot {
             VideoSelectId::Scaling => &mut self.settings_ui.video_scaling_select_popover,
             VideoSelectId::Fps => &mut self.settings_ui.video_fps_select_popover,
             VideoSelectId::Profile => &mut self.settings_ui.video_profile_select_popover,
+            VideoSelectId::TonemapAlgorithm => {
+                &mut self.settings_ui.video_tonemap_algorithm_select_popover
+            }
+            VideoSelectId::SourcePeak => &mut self.settings_ui.video_source_peak_select_popover,
+            VideoSelectId::SourceOverride => {
+                &mut self.settings_ui.video_source_override_select_popover
+            }
         }
     }
 
@@ -711,7 +759,20 @@ impl FrameRoot {
                     apply_x264_profile(config, value)
                 }
             }),
+            VideoSelectId::TonemapAlgorithm => self
+                .update_selected_config(|config| apply_hdr_tonemap_algorithm(config, option_id)),
+            VideoSelectId::SourcePeak => self
+                .update_selected_config(|config| apply_hdr_source_peak_mode(config, option_id)),
+            VideoSelectId::SourceOverride => self
+                .update_selected_config(|config| apply_hdr_source_override(config, option_id)),
         };
+        if matches!(id, VideoSelectId::SourceOverride) {
+            // 「覆盖救回」：从非 HDR 平铺翻转进 HDR 系时色彩管理回展开——平铺
+            // 形态没有折叠件，残留的收起态会让整块在切换瞬间收成一行（刚操作
+            // 的覆盖行当场消失）。仅保展开、不重置「高级」——该路径下用户可能
+            // 正在高级子区内操作。
+            self.settings_ui.hdr_section_expanded = true;
+        }
         self.close_video_select(id);
         changed
     }

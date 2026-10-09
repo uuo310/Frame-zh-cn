@@ -15,6 +15,7 @@ pub const FRAME_FONT_FEATURE_TAGS: [(&str, u32); 1] = [("kern", 1)];
 pub const FRAME_TABULAR_NUMBER_FONT_FEATURE_TAG: (&str, u32) = ("tnum", 1);
 pub const ICON_FRAME: &str = "icons/frame.svg";
 pub const ICON_ARROW_DOWN: &str = "icons/arrow-down.svg";
+pub const ICON_CHEVRON_DOWN: &str = "icons/chevron-down.svg";
 pub const ICON_LAYOUT_LIST: &str = "icons/layout-list.svg";
 pub const ICON_LIST_CHECKS: &str = "icons/list-checks.svg";
 pub const ICON_TERMINAL: &str = "icons/terminal.svg";
@@ -61,6 +62,8 @@ const FRAME_FONT_MEDIUM_BYTES: &[u8] =
     include_bytes!("../../assets/fonts/OverusedGrotesk-Medium.ttf");
 
 const ARROW_DOWN_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M12 18.502V5.00195" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="M18 13.002C18 13.002 13.5811 19.0019 12 19.002C10.4188 19.002 6 13.002 6 13.002" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></svg>"#;
+// 折叠键专用：比同族 Hugeicons 图标加粗一档（1.5 → 2.0），配合尺寸上调让折叠标识更醒目。
+const CHEVRON_DOWN_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M18 9.5C18 9.5 13.5811 14.5 12 14.5C10.4188 14.5 6 9.5 6 9.5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.0"/></svg>"#;
 const LAYOUT_LIST_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M2 11.4C2 10.2417 2.24173 10 3.4 10H20.6C21.7583 10 22 10.2417 22 11.4V12.6C22 13.7583 21.7583 14 20.6 14H3.4C2.24173 14 2 13.7583 2 12.6V11.4Z" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M2 3.4C2 2.24173 2.24173 2 3.4 2H20.6C21.7583 2 22 2.24173 22 3.4V4.6C22 5.75827 21.7583 6 20.6 6H3.4C2.24173 6 2 5.75827 2 4.6V3.4Z" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M2 19.4C2 18.2417 2.24173 18 3.4 18H20.6C21.7583 18 22 18.2417 22 19.4V20.6C22 21.7583 21.7583 22 20.6 22H3.4C2.24173 22 2 21.7583 2 20.6V19.4Z" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/></svg>"#;
 const LIST_CHECKS_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M11 6L21 6" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M11 12L21 12" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M11 18L21 18" stroke="currentColor" stroke-linecap="round" stroke-width="1.5"/><path d="M3 7.39286C3 7.39286 4 8.04466 4.5 9C4.5 9 6 5.25 8 4" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="M3 18.3929C3 18.3929 4 19.0447 4.5 20C4.5 20 6 16.25 8 15" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></svg>"#;
 const TERMINAL_SVG: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"><path d="M4.00004 17C4.00004 17 9.99999 12.5811 10 11C10 9.41884 4 5 4 5" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/><path d="M12 19H20" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"/></svg>"#;
@@ -110,6 +113,7 @@ impl AssetSource for FrameAssets {
             FRAME_FONT_MEDIUM_PATH => Cow::Borrowed(FRAME_FONT_MEDIUM_BYTES),
             ICON_FRAME => Cow::Borrowed(FRAME_ICON_SVG.as_bytes()),
             ICON_ARROW_DOWN => Cow::Borrowed(ARROW_DOWN_SVG.as_bytes()),
+            ICON_CHEVRON_DOWN => Cow::Borrowed(CHEVRON_DOWN_SVG.as_bytes()),
             ICON_LAYOUT_LIST => Cow::Borrowed(LAYOUT_LIST_SVG.as_bytes()),
             ICON_LIST_CHECKS => Cow::Borrowed(LIST_CHECKS_SVG.as_bytes()),
             ICON_TERMINAL => Cow::Borrowed(TERMINAL_SVG.as_bytes()),
@@ -165,6 +169,7 @@ impl AssetSource for FrameAssets {
                 SharedString::from("bookmark.svg"),
                 SharedString::from("captions.svg"),
                 SharedString::from("check.svg"),
+                SharedString::from("chevron-down.svg"),
                 SharedString::from("close.svg"),
                 SharedString::from("copy.svg"),
                 SharedString::from("crop.svg"),

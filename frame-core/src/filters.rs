@@ -2,8 +2,8 @@ use crate::{
     media_filters::{
         build_audio_effect_filters, build_video_post_scale_filters, build_video_pre_scale_filters,
     },
-    media_rules::is_image_container,
-    types::ConversionConfig,
+    media_rules::{is_gif_container, is_image_container, is_video_pixel_format_allowed},
+    types::{ConversionConfig, HDR_PEAK_MAX_NIT, HDR_PEAK_MIN_NIT, HDR_TONEMAP_ALGORITHMS},
 };
 
 pub const EVEN_DIMENSIONS_FILTER: &str = "pad=ceil(iw/2)*2:ceil(ih/2)*2:0:0";
@@ -58,6 +58,9 @@ fn rounded_i32(value: f64, min_value: f64) -> i32 {
 pub fn build_video_filters(config: &ConversionConfig, include_scale: bool) -> Vec<String> {
     let mut filters = Vec::new();
     let is_image = is_image_container(&config.container);
+
+    // HDR→SDR 段位于链最前（几何 → pre_scale → scale → post_scale → 字幕，天然在几何之前）。
+    filters.extend(build_hdr_tonemap_filters(config));
 
     if config.flip_horizontal {
         filters.push("hflip".to_string());
@@ -155,6 +158,161 @@ pub fn build_video_filters(config: &ConversionConfig, include_scale: bool) -> Ve
     }
 
     filters
+}
+
+/// 参考白亮度（SDR 白）：`tonemap=peak=` 的单位基准（nit/100 = 参考白倍数刻度）。
+const HDR_REFERENCE_WHITE_NIT: f64 = 100.0;
+
+/// HDR→SDR 链路输入段解析结果。
+enum HdrTonemapInput {
+    /// 依赖帧自带色彩标定（探测到 PQ/HLG 的正常实源）。
+    FromStream,
+    /// 强制注入输入传输特性（错标源兜底）：值为目标 `zscale=tin=`。
+    ForceTransfer(&'static str),
+}
+
+/// HDR→SDR 参数层判据：开关 + 源类型覆盖 / 源类型的解析（不含容器维度）。
+///
+/// 界面层／规范化层与滤镜层共用此判据，避免「界面显示在转」与「实际转不转」漂移。
+/// - 总开关关闭 → 不转；
+/// - `treat_as_sdr` → 不转（错标兜底：SDR 内容被标成 HDR）；
+/// - `force_pq`／`force_hlg` → 转（错标兜底：真 HDR 被标成 SDR）；
+/// - `auto` → 按探测源类型（pq/hlg 转，sdr 不转）。
+#[must_use]
+pub fn hdr_tonemap_requested(enabled: bool, source_override: &str, source_kind: &str) -> bool {
+    if !enabled {
+        return false;
+    }
+    match source_override {
+        "treat_as_sdr" => false,
+        "force_pq" | "force_hlg" => true,
+        _ => matches!(source_kind, "pq" | "hlg"),
+    }
+}
+
+/// HDR→SDR 容器层判据：图像与 GIF 输出不承载映射段
+///（图像是 8-bit 单帧语义、GIF 为 8-bit 调色板链路，均与 10-bit 优先的视频工作流无关）。
+#[must_use]
+pub fn hdr_tonemap_container_applies(container: &str) -> bool {
+    !is_image_container(container) && !is_gif_container(container)
+}
+
+/// 解析链路输入段。`None` = 直通（不产出链段）；`Some` = 产出，并给出注入方式。
+fn resolve_hdr_tonemap_input(config: &ConversionConfig) -> Option<HdrTonemapInput> {
+    if !hdr_tonemap_requested(
+        config.hdr_conversion_enabled,
+        &config.hdr_source_override,
+        &config.hdr_source_kind,
+    ) {
+        return None;
+    }
+    match config.hdr_source_override.as_str() {
+        "force_pq" => Some(HdrTonemapInput::ForceTransfer("smpte2084")),
+        "force_hlg" => Some(HdrTonemapInput::ForceTransfer("arib-std-b67")),
+        _ => Some(HdrTonemapInput::FromStream),
+    }
+}
+
+/// HDR→SDR 映射段是否生效（链将产出映射段；导出侧凭此写 §5.3 输出色标）。
+#[must_use]
+pub fn hdr_tonemap_active(config: &ConversionConfig) -> bool {
+    hdr_tonemap_container_applies(&config.container)
+        && hdr_tonemap_requested(
+            config.hdr_conversion_enabled,
+            &config.hdr_source_override,
+            &config.hdr_source_kind,
+        )
+}
+
+/// 组装 HDR→SDR 映射链（zscale 单链，需求文档 §5.2 模板）。空 Vec = 直通。
+///
+/// PQ 与 HLG 同模板（`npl=100` 统一；传输特性由帧标定或注入提供）：
+/// `zscale=t=linear:npl=100,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=<algo>:desat=2,zscale=t=bt709:m=bt709:r=tv,format=<pix>`
+///
+/// 实测依据（n8.1.2，`npl=100`）：zimg 对 PQ 与 HLG 同用「L = 绝对亮度/npl」标定
+/// （zimg.h 定义 npl 为 SDR 系统标称亮度；gamma.cpp 中 PQ 为 `10000/npl`、HLG 为 `1000/npl`），
+/// `HandBrake` 同口径（libhb/colorspace.c npl 默认 100，PQ/HLG 同路径）。
+///
+/// 图像与 GIF 输出不接该段：图像管线是 8-bit 单帧语义、GIF 为 8-bit 调色板链路，
+/// 均与 10-bit 优先的视频工作流（本机预压 → 剪映 → 回传精压）无关。
+fn build_hdr_tonemap_filters(config: &ConversionConfig) -> Vec<String> {
+    if !hdr_tonemap_container_applies(&config.container) {
+        return Vec::new();
+    }
+    let Some(input) = resolve_hdr_tonemap_input(config) else {
+        return Vec::new();
+    };
+
+    let linearize = match input {
+        HdrTonemapInput::FromStream => "zscale=t=linear:npl=100".to_string(),
+        // 注入段须 `pin/tin/min`（输入覆盖）与 `p/m`（输出声明）全写：缺输出声明时
+        // zimg 目标属性落 UNSPECIFIED，转换图无路径（实测 `no path between colorspaces`，rc≠0）。
+        // 注入段与「源自带标定」输出逐位一致（YAVG 962.013 对照实测）。
+        HdrTonemapInput::ForceTransfer(tin) => {
+            format!("zscale=t=linear:npl=100:pin=bt2020:tin={tin}:min=bt2020nc:p=bt2020:m=bt2020nc")
+        }
+    };
+
+    let target = effective_pixel_format(config);
+
+    vec![
+        linearize,
+        "format=gbrpf32le".to_string(),
+        "zscale=p=bt709".to_string(),
+        hdr_tonemap_filter(config),
+        "zscale=t=bt709:m=bt709:r=tv".to_string(),
+        format!("format={target}"),
+    ]
+}
+
+/// `tonemap=` 段：算法 + `desat=2`（官方默认值，写死）+ 可选 `peak=`。
+fn hdr_tonemap_filter(config: &ConversionConfig) -> String {
+    let algorithm = if HDR_TONEMAP_ALGORITHMS.contains(&config.hdr_tonemap_algorithm.as_str()) {
+        config.hdr_tonemap_algorithm.as_str()
+    } else {
+        "hable"
+    };
+    hdr_peak_override(config).map_or_else(
+        || format!("tonemap=tonemap={algorithm}:desat=2"),
+        |peak| format!("tonemap=tonemap={algorithm}:desat=2:peak={peak}"),
+    )
+}
+
+/// 源峰值 override（nit → 参考白倍数）。`None` = 自动（不传参）：
+/// ffmpeg 按 `MaxCLL` → 母带亮度 → 兜底推算（`ff_determine_signal_peak`）。
+fn hdr_peak_override(config: &ConversionConfig) -> Option<f64> {
+    config
+        .hdr_source_peak
+        .map(|nit| f64::from(nit.clamp(HDR_PEAK_MIN_NIT, HDR_PEAK_MAX_NIT)) / HDR_REFERENCE_WHITE_NIT)
+}
+
+/// HDR→SDR 链路下「自动」像素格式的实际落点：容器×编码器白名单 10-bit 优先
+/// （`libx264` / `libx265` / `hevc_nvenc` → `yuv420p10le`；`h264_nvenc`、mpegts/m2ts
+/// 下 libx264 等白名单无 10-bit → 落 `yuv420p`）。
+///
+/// 原始参数版：链尾 `format=`、参数层 profile 守卫与界面层落点标注共用，
+/// 防「显示落点 ≠ 实际落点」漂移。
+#[must_use]
+pub fn hdr_auto_pixel_format_landing(container: &str, video_codec: &str) -> &'static str {
+    if is_video_pixel_format_allowed(container, video_codec, "yuv420p10le") {
+        "yuv420p10le"
+    } else {
+        "yuv420p"
+    }
+}
+
+/// 实际生效的编码像素格式：HDR 链路生效且像素格式为「自动」时按
+/// [`hdr_auto_pixel_format_landing`] 解析落点；其余情况返回字面值。
+///
+/// 需要「实际值」的消费方（链尾 `format=`、profile 守卫、界面展示）必须经此解析：
+/// `auto` 字面值在 HDR 生效时会失明（链已落 10-bit，字面值判断却落 8-bit 分支）。
+#[must_use]
+pub fn effective_pixel_format(config: &ConversionConfig) -> &str {
+    if config.pixel_format == "auto" && hdr_tonemap_active(config) {
+        hdr_auto_pixel_format_landing(&config.container, &config.video_codec)
+    } else {
+        config.pixel_format.as_str()
+    }
 }
 
 fn build_resolution_scale_filter(config: &ConversionConfig) -> String {
@@ -437,6 +595,11 @@ mod tests {
             videotoolbox_allow_sw: false,
             hw_decode: false,
             pixel_format: "auto".to_string(),
+            hdr_conversion_enabled: false,
+            hdr_tonemap_algorithm: "hable".to_string(),
+            hdr_source_peak: None,
+            hdr_source_override: "auto".to_string(),
+            hdr_source_kind: "sdr".to_string(),
             image_jpeg_quality: 85,
             image_jpeg_huffman: "optimal".to_string(),
             image_webp_lossless: false,
@@ -711,5 +874,266 @@ mod tests {
             filters,
             vec!["subtitles='/tmp/sub.srt':force_style='Fontsize=28'"]
         );
+    }
+
+    fn hdr_config() -> ConversionConfig {
+        let mut config = default_config();
+        config.hdr_conversion_enabled = true;
+        config.hdr_source_kind = "pq".to_string();
+        config
+    }
+
+    #[test]
+    fn hdr_disabled_produces_no_filters() {
+        let config = default_config();
+        assert!(!config.hdr_conversion_enabled);
+        assert!(build_video_filters(&config, true).is_empty());
+    }
+
+    #[test]
+    fn hdr_pq_from_stream_matches_chain_template() {
+        let config = hdr_config();
+        assert_eq!(
+            build_video_filters(&config, true),
+            vec![
+                "zscale=t=linear:npl=100",
+                "format=gbrpf32le",
+                "zscale=p=bt709",
+                "tonemap=tonemap=hable:desat=2",
+                "zscale=t=bt709:m=bt709:r=tv",
+                "format=yuv420p10le",
+            ]
+        );
+    }
+
+    #[test]
+    fn hdr_hlg_uses_same_chain_template_as_pq() {
+        let pq = hdr_config();
+        let mut hlg = hdr_config();
+        hlg.hdr_source_kind = "hlg".to_string();
+        assert_eq!(
+            build_video_filters(&pq, true),
+            build_video_filters(&hlg, true)
+        );
+    }
+
+    #[test]
+    fn hdr_auto_with_sdr_source_bypasses() {
+        let mut config = default_config();
+        config.hdr_conversion_enabled = true;
+        assert!(build_video_filters(&config, true).is_empty());
+    }
+
+    #[test]
+    fn hdr_treat_as_sdr_bypasses() {
+        let mut config = hdr_config();
+        config.hdr_source_override = "treat_as_sdr".to_string();
+        assert!(build_video_filters(&config, true).is_empty());
+    }
+
+    #[test]
+    fn hdr_force_pq_injects_input_attributes() {
+        let mut config = hdr_config();
+        config.hdr_source_kind = "sdr".to_string();
+        config.hdr_source_override = "force_pq".to_string();
+
+        let filters = build_video_filters(&config, true);
+
+        assert_eq!(
+            filters[0],
+            "zscale=t=linear:npl=100:pin=bt2020:tin=smpte2084:min=bt2020nc:p=bt2020:m=bt2020nc"
+        );
+    }
+
+    #[test]
+    fn hdr_force_hlg_injects_arib_transfer() {
+        let mut config = hdr_config();
+        config.hdr_source_kind = "sdr".to_string();
+        config.hdr_source_override = "force_hlg".to_string();
+
+        let filters = build_video_filters(&config, true);
+
+        assert_eq!(
+            filters[0],
+            "zscale=t=linear:npl=100:pin=bt2020:tin=arib-std-b67:min=bt2020nc:p=bt2020:m=bt2020nc"
+        );
+    }
+
+    #[test]
+    fn hdr_target_format_falls_back_to_8bit_when_whitelist_denies_10bit() {
+        let mut config = hdr_config();
+        config.container = "mpegts".to_string();
+        config.video_codec = "libx264".to_string();
+        assert_eq!(
+            build_video_filters(&config, true).last().unwrap(),
+            "format=yuv420p"
+        );
+    }
+
+    #[test]
+    fn hdr_explicit_pixel_format_is_respected() {
+        let mut config = hdr_config();
+        config.pixel_format = "yuv420p".to_string();
+        assert_eq!(
+            build_video_filters(&config, true).last().unwrap(),
+            "format=yuv420p"
+        );
+    }
+
+    #[test]
+    fn hdr_auto_pixel_format_landing_picks_10bit_by_whitelist() {
+        assert_eq!(
+            hdr_auto_pixel_format_landing("mp4", "libx264"),
+            "yuv420p10le"
+        );
+        assert_eq!(hdr_auto_pixel_format_landing("mp4", "h264_nvenc"), "yuv420p");
+        assert_eq!(
+            hdr_auto_pixel_format_landing("mpegts", "libx264"),
+            "yuv420p"
+        );
+    }
+
+    #[test]
+    fn effective_pixel_format_resolves_auto_only_under_active_hdr() {
+        // HDR 生效 + 自动 → 白名单落点（与链尾 `format=` 同源）。
+        let pq = hdr_config();
+        assert_eq!(effective_pixel_format(&pq), "yuv420p10le");
+
+        // HDR 未启用 → 「自动」保持字面值（编码器与源自决，不可静态推断）。
+        let sdr = default_config();
+        assert_eq!(effective_pixel_format(&sdr), "auto");
+
+        // 覆盖直通（视为 SDR）→ 链路不生效 → 字面值。
+        let mut bypass = hdr_config();
+        bypass.hdr_source_override = "treat_as_sdr".to_string();
+        assert_eq!(effective_pixel_format(&bypass), "auto");
+
+        // 手选值 → 原样返回（HDR 生效也尊重）。
+        let mut manual = hdr_config();
+        manual.pixel_format = "yuv420p".to_string();
+        assert_eq!(effective_pixel_format(&manual), "yuv420p");
+
+        // HDR 生效但白名单无 10-bit → 8-bit 基础格式。
+        let mut mpegts = hdr_config();
+        mpegts.container = "mpegts".to_string();
+        assert_eq!(effective_pixel_format(&mpegts), "yuv420p");
+    }
+
+    #[test]
+    fn hdr_auto_peak_omits_parameter() {
+        let config = hdr_config();
+        assert_eq!(
+            build_video_filters(&config, true)[3],
+            "tonemap=tonemap=hable:desat=2"
+        );
+    }
+
+    #[test]
+    fn hdr_peak_override_scales_nit_to_reference_white() {
+        let mut config = hdr_config();
+        config.hdr_source_peak = Some(1000);
+        assert_eq!(
+            build_video_filters(&config, true)[3],
+            "tonemap=tonemap=hable:desat=2:peak=10"
+        );
+    }
+
+    #[test]
+    fn hdr_peak_override_is_clamped_into_range() {
+        let mut config = hdr_config();
+        config.hdr_source_peak = Some(50);
+        assert_eq!(
+            build_video_filters(&config, true)[3],
+            "tonemap=tonemap=hable:desat=2:peak=1"
+        );
+
+        config.hdr_source_peak = Some(u32::MAX);
+        assert_eq!(
+            build_video_filters(&config, true)[3],
+            "tonemap=tonemap=hable:desat=2:peak=100"
+        );
+    }
+
+    #[test]
+    fn hdr_algorithm_falls_back_to_hable_when_unknown() {
+        let mut config = hdr_config();
+        config.hdr_tonemap_algorithm = "bt2390".to_string();
+        assert_eq!(
+            build_video_filters(&config, true)[3],
+            "tonemap=tonemap=hable:desat=2"
+        );
+    }
+
+    #[test]
+    fn hdr_algorithm_selection_is_downloaded() {
+        let mut config = hdr_config();
+        config.hdr_tonemap_algorithm = "mobius".to_string();
+        assert_eq!(
+            build_video_filters(&config, true)[3],
+            "tonemap=tonemap=mobius:desat=2"
+        );
+    }
+
+    #[test]
+    fn hdr_segment_precedes_geometry_filters() {
+        let mut config = hdr_config();
+        config.flip_horizontal = true;
+        config.rotation = "90".to_string();
+
+        let filters = build_video_filters(&config, true);
+
+        assert_eq!(filters[0], "zscale=t=linear:npl=100");
+        assert_eq!(filters[6], "hflip");
+        assert_eq!(filters[7], "transpose=1");
+    }
+
+    #[test]
+    fn hdr_is_skipped_for_gif_output() {
+        let mut config = hdr_config();
+        config.container = "gif".to_string();
+        assert!(build_video_filters(&config, true).is_empty());
+    }
+
+    #[test]
+    fn hdr_is_skipped_for_image_output() {
+        let mut config = hdr_config();
+        config.container = "png".to_string();
+        assert!(build_video_filters(&config, true).is_empty());
+    }
+
+    #[test]
+    fn hdr_tonemap_active_matches_chain_emission() {
+        let config = default_config();
+        assert!(!hdr_tonemap_active(&config));
+
+        let mut pq = hdr_config();
+        assert!(hdr_tonemap_active(&pq));
+
+        pq.hdr_conversion_enabled = false;
+        assert!(!hdr_tonemap_active(&pq));
+
+        pq.hdr_conversion_enabled = true;
+        pq.container = "gif".to_string();
+        assert!(!hdr_tonemap_active(&pq));
+    }
+
+    #[test]
+    fn hdr_tonemap_requested_resolves_override_combinations() {
+        assert!(!hdr_tonemap_requested(false, "auto", "pq"));
+        assert!(!hdr_tonemap_requested(true, "treat_as_sdr", "pq"));
+        assert!(!hdr_tonemap_requested(true, "auto", "sdr"));
+        assert!(hdr_tonemap_requested(true, "auto", "pq"));
+        assert!(hdr_tonemap_requested(true, "auto", "hlg"));
+        assert!(hdr_tonemap_requested(true, "force_pq", "sdr"));
+        assert!(hdr_tonemap_requested(true, "force_hlg", "sdr"));
+    }
+
+    #[test]
+    fn hdr_tonemap_container_applies_excludes_images_and_gif() {
+        assert!(hdr_tonemap_container_applies("mp4"));
+        assert!(hdr_tonemap_container_applies("mkv"));
+        assert!(hdr_tonemap_container_applies("mpegts"));
+        assert!(!hdr_tonemap_container_applies("png"));
+        assert!(!hdr_tonemap_container_applies("gif"));
     }
 }

@@ -9,6 +9,11 @@ use crate::types::{
 };
 use crate::utils::{parse_frame_rate_string, parse_probe_bitrate};
 
+/// ffprobe side-data 类型名：Dolby Vision 配置记录（`AV_PKT_DATA_DOVI_CONF`，
+/// 经 `av_packet_side_data_name` 输出；ffprobe.c 打印于视频流的
+/// `side_data_list[].side_data_type`）。
+const DOVI_SIDE_DATA_TYPE: &str = "DOVI configuration record";
+
 #[must_use]
 pub fn ffprobe_json_args(file_path: &str) -> Vec<String> {
     vec![
@@ -104,7 +109,14 @@ fn metadata_from_ffprobe(
         metadata
             .color_primaries
             .clone_from(&video_stream.color_primaries);
+        metadata
+            .color_transfer
+            .clone_from(&video_stream.color_transfer);
         metadata.profile.clone_from(&video_stream.profile);
+        metadata.dolby_vision = video_stream
+            .side_data_list
+            .iter()
+            .any(|side_data| side_data.side_data_type.as_deref() == Some(DOVI_SIDE_DATA_TYPE));
 
         if let (Some(width), Some(height)) = (video_stream.width, video_stream.height)
             && width > 0
@@ -383,6 +395,7 @@ mod tests {
                         "color_space": "bt709",
                         "color_range": "tv",
                         "color_primaries": "bt709",
+                        "color_transfer": "bt709",
                         "profile": "High"
                     },
                     {
@@ -413,6 +426,7 @@ mod tests {
 
         assert_eq!(metadata.media_kind, "video");
         assert_eq!(metadata.video_codec.as_deref(), Some("h264"));
+        assert_eq!(metadata.color_transfer.as_deref(), Some("bt709"));
         assert_eq!(metadata.resolution.as_deref(), Some("1920x1080"));
         assert_eq!(metadata.audio_codec.as_deref(), Some("aac"));
         assert_eq!(metadata.audio_tracks[0].label.as_deref(), Some("Main"));
@@ -584,6 +598,72 @@ mod tests {
             ),
             (Some(2160), Some(3840), Some("2160x3840"))
         );
+    }
+
+    #[test]
+    fn parse_ffprobe_stdout_detects_dolby_vision_side_data() {
+        // 档案格式（ffprobe `print_dovi_configuration_record`）：字段扁平输出在
+        // `side_data_list[]` 条目上，类型名见 `av_packet_side_data_name`。
+        let metadata = parse_ffprobe_stdout(
+            "/tmp/dolby-vision.mp4",
+            r#"{
+                "streams": [
+                    {
+                        "index": 0,
+                        "codec_type": "video",
+                        "codec_name": "hevc",
+                        "width": 3840,
+                        "height": 2160,
+                        "pix_fmt": "yuv420p10le",
+                        "color_transfer": "smpte2084",
+                        "side_data_list": [
+                            {
+                                "side_data_type": "DOVI configuration record",
+                                "dv_version_major": 1,
+                                "dv_version_minor": 0,
+                                "dv_profile": 8,
+                                "dv_level": 6,
+                                "rpu_present_flag": 1,
+                                "el_present_flag": 0,
+                                "bl_present_flag": 1,
+                                "dv_bl_signal_compatibility_id": 1,
+                                "dv_md_compression": "none"
+                            }
+                        ]
+                    }
+                ],
+                "format": {}
+            }"#,
+        )
+        .expect("DOVI probe metadata should parse");
+
+        assert!(metadata.dolby_vision);
+    }
+
+    #[test]
+    fn parse_ffprobe_stdout_treats_other_side_data_as_no_dolby_vision() {
+        // 有 side data 但类型不是 DOVI（旋转矩阵）→ 不判 DV。
+        let metadata = parse_ffprobe_stdout(
+            "/tmp/rotated.mp4",
+            r#"{
+                "streams": [
+                    {
+                        "index": 0,
+                        "codec_type": "video",
+                        "codec_name": "hevc",
+                        "width": 1920,
+                        "height": 1080,
+                        "side_data_list": [
+                            { "side_data_type": "Display Matrix", "rotation": 90 }
+                        ]
+                    }
+                ],
+                "format": {}
+            }"#,
+        )
+        .expect("rotated probe metadata should parse");
+
+        assert!(!metadata.dolby_vision);
     }
 
     #[test]

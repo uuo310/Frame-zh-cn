@@ -194,6 +194,24 @@ pub fn format_source_hz(value: Option<&str>) -> String {
     format!("{hz} Hz")
 }
 
+/// 传输特性（`color_transfer`）显示值：PQ/HLG 补人话前缀，其余原值。
+#[must_use]
+pub fn format_source_transfer(raw: Option<&str>) -> String {
+    let Some(raw) = raw else {
+        return "—".to_string();
+    };
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return "—".to_string();
+    }
+
+    match raw.to_ascii_lowercase().as_str() {
+        "smpte2084" => "PQ (smpte2084)".to_string(),
+        "arib-std-b67" => "HLG (arib-std-b67)".to_string(),
+        _ => raw.to_string(),
+    }
+}
+
 fn source_image_rows(metadata: &SourceMetadata) -> Vec<SourceInfoRow> {
     let mut rows = Vec::new();
     push_optional_row(&mut rows, "图像编码", metadata.video_codec.as_deref());
@@ -210,6 +228,7 @@ fn source_image_rows(metadata: &SourceMetadata) -> Vec<SourceInfoRow> {
         "色彩原色",
         metadata.color_primaries.as_deref(),
     );
+    push_color_transfer_row(&mut rows, metadata.color_transfer.as_deref());
     rows
 }
 
@@ -257,6 +276,7 @@ fn source_video_rows(metadata: &SourceMetadata) -> Vec<SourceInfoRow> {
         "色彩原色",
         metadata.color_primaries.as_deref(),
     );
+    push_color_transfer_row(&mut rows, metadata.color_transfer.as_deref());
     if metadata
         .video_bitrate_kbps
         .is_some_and(|bitrate| bitrate > 0.0)
@@ -340,6 +360,15 @@ fn push_optional_row(rows: &mut Vec<SourceInfoRow>, label: &'static str, value: 
         rows.push(SourceInfoRow {
             label,
             value: display_source_value(value),
+        });
+    }
+}
+
+fn push_color_transfer_row(rows: &mut Vec<SourceInfoRow>, value: Option<&str>) {
+    if value.is_some_and(|value| !value.trim().is_empty()) {
+        rows.push(SourceInfoRow {
+            label: "传输特性",
+            value: format_source_transfer(value),
         });
     }
 }

@@ -46,6 +46,8 @@ impl Render for FrameRoot {
             selected_file.map_or_else(ConversionConfig::default, |file| file.config.clone());
         let selected_output_name =
             selected_file.map_or_else(String::new, |file| file.output_name.clone());
+        // 对比态先于请求构造同步：首帧不得带上一文件的「原片」态。
+        self.sync_preview_hdr_compare_for_selection(selected_file_id.as_deref());
         let preview_runtime_request = self.selected_preview_runtime_request(&source_metadata_entry);
         self.sync_preview_crop_for_selection(
             selected_file_id.as_deref(),
@@ -206,6 +208,8 @@ impl Render for FrameRoot {
                 let video_x265_rdoq_level_focus =
                     self.ensure_text_input_focus(FrameTextInputKind::VideoX265RdoqLevel, cx);
                 let gif_loop_focus = self.ensure_text_input_focus(FrameTextInputKind::GifLoop, cx);
+                let video_hdr_source_peak_focus =
+                    self.ensure_text_input_focus(FrameTextInputKind::VideoHdrSourcePeak, cx);
                 let video_selects_enabled =
                     self.settings_ui.active_tab == SettingsTab::Video
                         && !self.file_queue.selected_file_locked();
@@ -346,6 +350,68 @@ impl Render for FrameRoot {
                 );
                 let video_profile_select_last_focus = self.ensure_focus(
                     FrameFocusKey::Control("video-profile-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_tonemap_algorithm_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-tonemap-algorithm-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_tonemap_algorithm_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-tonemap-algorithm-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_tonemap_algorithm_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control(
+                        "video-tonemap-algorithm-select-first-option".to_string(),
+                    ),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_tonemap_algorithm_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-tonemap-algorithm-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_peak_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-peak-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_peak_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-peak-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_peak_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-peak-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_peak_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-peak-select-last-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_override_select_trigger_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-override-select".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_override_select_panel_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-override-select-panel".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_override_select_first_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-override-select-first-option".to_string()),
+                    video_selects_enabled,
+                    cx,
+                );
+                let video_source_override_select_last_focus = self.ensure_focus(
+                    FrameFocusKey::Control("video-source-override-select-last-option".to_string()),
                     video_selects_enabled,
                     cx,
                 );
@@ -658,6 +724,8 @@ impl Render for FrameRoot {
                     bitrate_window_popover: self.settings_ui.bitrate_window_popover,
                     bitrate_analysis: &bitrate_analysis_entry,
                     settings_disabled: self.file_queue.selected_file_locked(),
+                    hdr_advanced_expanded: self.settings_ui.hdr_advanced_expanded,
+                    hdr_section_expanded: self.settings_ui.hdr_section_expanded,
                     output_name: &selected_output_name,
                     output_name_focus: Some(&output_name_focus),
                     video_width_focus: Some(&video_width_focus),
@@ -671,6 +739,7 @@ impl Render for FrameRoot {
                     video_x265_rd_level_focus: Some(&video_x265_rd_level_focus),
                     video_x265_rdoq_level_focus: Some(&video_x265_rdoq_level_focus),
                     gif_loop_focus: Some(&gif_loop_focus),
+                    video_hdr_source_peak_focus: Some(&video_hdr_source_peak_focus),
                     video_pixel_format_select: SettingsVideoSelectUi {
                         popover: self.settings_ui.video_pixel_format_select_popover,
                         scroll_handle: &self.settings_ui.video_pixel_format_select_scroll,
@@ -746,6 +815,40 @@ impl Render for FrameRoot {
                             panel: Some(&video_profile_select_panel_focus),
                             first_option: Some(&video_profile_select_first_focus),
                             last_option: Some(&video_profile_select_last_focus),
+                        },
+                    },
+                    video_tonemap_algorithm_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_tonemap_algorithm_select_popover,
+                        scroll_handle: &self.settings_ui.video_tonemap_algorithm_select_scroll,
+                        anchor_y: self
+                            .video_select_anchor_y(VideoSelectId::TonemapAlgorithm),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_tonemap_algorithm_select_trigger_focus),
+                            panel: Some(&video_tonemap_algorithm_select_panel_focus),
+                            first_option: Some(&video_tonemap_algorithm_select_first_focus),
+                            last_option: Some(&video_tonemap_algorithm_select_last_focus),
+                        },
+                    },
+                    video_source_peak_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_source_peak_select_popover,
+                        scroll_handle: &self.settings_ui.video_source_peak_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::SourcePeak),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_source_peak_select_trigger_focus),
+                            panel: Some(&video_source_peak_select_panel_focus),
+                            first_option: Some(&video_source_peak_select_first_focus),
+                            last_option: Some(&video_source_peak_select_last_focus),
+                        },
+                    },
+                    video_source_override_select: SettingsVideoSelectUi {
+                        popover: self.settings_ui.video_source_override_select_popover,
+                        scroll_handle: &self.settings_ui.video_source_override_select_scroll,
+                        anchor_y: self.video_select_anchor_y(VideoSelectId::SourceOverride),
+                        focuses: SettingsSelectFocuses {
+                            trigger: Some(&video_source_override_select_trigger_focus),
+                            panel: Some(&video_source_override_select_panel_focus),
+                            first_option: Some(&video_source_override_select_first_focus),
+                            last_option: Some(&video_source_override_select_last_focus),
                         },
                     },
                     audio_codec_select: SettingsVideoSelectUi {
@@ -866,6 +969,7 @@ impl Render for FrameRoot {
                         canvas: preview_canvas,
                         crop: preview_crop,
                         overlay: preview_overlay,
+                        hdr_compare_source_active: self.preview_ui.hdr_preview_bypass,
                         viewport_focuses: PreviewViewportFocuses {
                             viewport: &preview_viewport_focus,
                             tools: PreviewToolFocuses {

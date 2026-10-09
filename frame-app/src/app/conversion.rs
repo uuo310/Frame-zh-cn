@@ -190,8 +190,13 @@ impl FrameRoot {
             return false;
         }
 
+        let previous = self.file_queue.selected_file_id().map(str::to_owned);
         let removed = self.file_queue.remove_file(id).is_some();
         if removed {
+            if self.file_queue.selected_file_id() != previous.as_deref() {
+                // 删除当前文件后自动改选邻近：语境变更，色彩管理视图态回默认。
+                self.reset_hdr_view_defaults();
+            }
             self.source_metadata.remove(id);
             self.bitrate_analysis.remove(id);
             self.conversion_events.remove_logs(id);

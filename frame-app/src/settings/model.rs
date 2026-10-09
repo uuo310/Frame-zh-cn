@@ -11,6 +11,14 @@ pub const DEFAULT_CRF: u8 = 23;
 pub const DEFAULT_QUALITY: u32 = 50;
 pub const DEFAULT_PRESET: &str = "medium";
 pub const DEFAULT_PIXEL_FORMAT: &str = "auto";
+/// HDR→SDR 映射算法默认值（zscale 链 tonemap 选项目）。
+pub const DEFAULT_HDR_TONEMAP_ALGORITHM: &str = "hable";
+/// 源类型覆盖默认值：按探测结果（`auto`）。
+pub const DEFAULT_HDR_SOURCE_OVERRIDE: &str = "auto";
+/// 源传输特性默认值：SDR（探测填充前的保守值）。
+pub const DEFAULT_HDR_SOURCE_KIND: &str = "sdr";
+/// 源峰值「手动」档的初值（nit）：HDR10 母带常见峰值，用户可改。
+pub const DEFAULT_HDR_SOURCE_PEAK_NIT: u32 = 1000;
 pub const DEFAULT_IMAGE_JPEG_QUALITY: u32 = 85;
 pub const DEFAULT_IMAGE_JPEG_HUFFMAN: &str = "optimal";
 pub const DEFAULT_IMAGE_WEBP_QUALITY: u32 = 75;
@@ -662,6 +670,16 @@ pub struct ConversionConfig {
     pub quality: u32,
     pub preset: String,
     pub pixel_format: String,
+    /// HDR→SDR 色彩管理：启用转换（检测到 PQ/HLG 时自动置真，用户可手动双向覆盖）。
+    pub hdr_conversion_enabled: bool,
+    /// 映射算法：`hable`／`mobius`／`reinhard`／`clip`／`linear`／`gamma`。
+    pub hdr_tonemap_algorithm: String,
+    /// 源峰值亮度（nit，100–10000）：`None` = 自动（由 ffmpeg 按元数据推算）。
+    pub hdr_source_peak: Option<u32>,
+    /// 源类型覆盖：`auto`／`force_pq`／`force_hlg`／`treat_as_sdr`（错标源兜底）。
+    pub hdr_source_override: String,
+    /// 源传输特性探测结果：`sdr`／`pq`／`hlg`（开文件时从探测元数据填充）。
+    pub hdr_source_kind: String,
     pub image_jpeg_quality: u32,
     pub image_jpeg_huffman: String,
     pub image_webp_lossless: bool,
@@ -739,6 +757,11 @@ impl Default for ConversionConfig {
             quality: DEFAULT_QUALITY,
             preset: DEFAULT_PRESET.to_string(),
             pixel_format: DEFAULT_PIXEL_FORMAT.to_string(),
+            hdr_conversion_enabled: false,
+            hdr_tonemap_algorithm: DEFAULT_HDR_TONEMAP_ALGORITHM.to_string(),
+            hdr_source_peak: None,
+            hdr_source_override: DEFAULT_HDR_SOURCE_OVERRIDE.to_string(),
+            hdr_source_kind: DEFAULT_HDR_SOURCE_KIND.to_string(),
             image_jpeg_quality: DEFAULT_IMAGE_JPEG_QUALITY,
             image_jpeg_huffman: DEFAULT_IMAGE_JPEG_HUFFMAN.to_string(),
             image_webp_lossless: false,
@@ -875,13 +898,26 @@ pub struct VideoCodecOption {
     pub disabled_reason: Option<&'static str>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct VideoPixelFormatOption {
     pub id: &'static str,
     pub label: &'static str,
     pub is_selected: bool,
     pub is_disabled: bool,
+    /// 尾随备注：`auto` 档在落点可推断时显化（HDR 链落点 / 非 HDR 源探测，
+    /// 如「YUV 4:2:0 (10-bit)」），不可推断回退「编码器默认」；具体档为原始 id
+    /// 或「不兼容的编码」。
+    pub caption: String,
+}
+
+/// HDR→SDR 色彩管理下拉选项（映射算法 / 源峰值 / 源类型覆盖共用）。
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HdrSelectOption {
+    pub id: &'static str,
+    pub label: &'static str,
     pub caption: &'static str,
+    pub is_selected: bool,
+    pub is_disabled: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1026,7 +1062,10 @@ pub struct SourceMetadata {
     pub color_space: Option<String>,
     pub color_range: Option<String>,
     pub color_primaries: Option<String>,
+    pub color_transfer: Option<String>,
     pub profile: Option<String>,
+    /// 源含 Dolby Vision 配置记录（DOVI side data）——只警告不转换。
+    pub dolby_vision: bool,
     pub transport_stream: Option<frame_core::types::TransportStreamMetadata>,
     /// Global stream index of the video stream whose info this panel shows, so
     /// bitrate analysis targets the same stream (multi-program TS ≠ always 0).

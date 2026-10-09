@@ -11,7 +11,7 @@ use crate::container::{
 use crate::error::ConversionError;
 use crate::filters::{
     build_audio_filters, build_encode_overlay_filter_complex, build_encode_video_filters,
-    build_overlay_filter_complex, build_video_filters, has_overlay,
+    build_overlay_filter_complex, build_video_filters, has_overlay, hdr_tonemap_active,
 };
 use crate::hwaccel;
 use crate::media_filters::validate_media_filters;
@@ -682,6 +682,19 @@ pub fn build_ffmpeg_args_with_hwaccel(
         if has_custom_pixel_format(config) {
             args.push("-pix_fmt".to_string());
             args.push(config.pixel_format.trim().to_string());
+        }
+
+        // §5.3 输出色标：HDR→SDR 转换生效时显式写 bt709，与滤镜链输出严格对齐
+        // （剪映等下游按标签读素材，漏写 = 白转）。预览（rawvideo）不经本函数，不受影响。
+        if hdr_tonemap_active(config) {
+            args.push("-colorspace".to_string());
+            args.push("bt709".to_string());
+            args.push("-color_primaries".to_string());
+            args.push("bt709".to_string());
+            args.push("-color_trc".to_string());
+            args.push("bt709".to_string());
+            args.push("-color_range".to_string());
+            args.push("tv".to_string());
         }
 
         if use_overlay {
@@ -1692,6 +1705,11 @@ mod tests {
             videotoolbox_allow_sw: false,
             hw_decode: false,
             pixel_format: "auto".to_string(),
+            hdr_conversion_enabled: false,
+            hdr_tonemap_algorithm: "hable".to_string(),
+            hdr_source_peak: None,
+            hdr_source_override: "auto".to_string(),
+            hdr_source_kind: "sdr".to_string(),
             image_jpeg_quality: 85,
             image_jpeg_huffman: "optimal".to_string(),
             image_webp_lossless: false,
@@ -1740,6 +1758,69 @@ mod tests {
             .expect("arguments should build");
 
         assert!(!args.iter().any(|arg| arg == EVEN_DIMENSIONS_FILTER));
+    }
+
+    #[test]
+    fn build_ffmpeg_args_writes_bt709_output_tags_for_hdr_tonemap() {
+        let mut config = sample_config("mp4", "libx264");
+        config.hdr_conversion_enabled = true;
+        config.hdr_source_kind = "pq".to_string();
+
+        let args = build_ffmpeg_args("input.mov", "output.mp4", &config, &sample_probe())
+            .expect("arguments should build");
+
+        for (key, value) in [
+            ("-colorspace", "bt709"),
+            ("-color_primaries", "bt709"),
+            ("-color_trc", "bt709"),
+            ("-color_range", "tv"),
+        ] {
+            let index = args
+                .iter()
+                .position(|arg| arg == key)
+                .unwrap_or_else(|| panic!("{key} should be present"));
+            assert_eq!(args[index + 1], value);
+        }
+
+        let vf_index = args.iter().position(|arg| arg == "-vf").unwrap();
+        assert!(args[vf_index + 1].starts_with("zscale=t=linear:npl=100"));
+        assert!(args[vf_index + 1].ends_with(EVEN_DIMENSIONS_FILTER));
+    }
+
+    #[test]
+    fn build_ffmpeg_args_omits_bt709_output_tags_without_hdr_tonemap() {
+        let config = sample_config("mp4", "libx264");
+
+        let args = build_ffmpeg_args("input.mov", "output.mp4", &config, &sample_probe())
+            .expect("arguments should build");
+
+        assert!(!args.iter().any(|arg| arg == "-colorspace"));
+        assert!(!args.iter().any(|arg| arg == "-color_trc"));
+    }
+
+    #[test]
+    fn build_ffmpeg_args_omits_bt709_output_tags_for_image_output() {
+        let mut config = sample_config("png", "png");
+        config.hdr_conversion_enabled = true;
+        config.hdr_source_kind = "pq".to_string();
+
+        let args = build_ffmpeg_args("input.mov", "output.png", &config, &sample_probe())
+            .expect("arguments should build");
+
+        assert!(!args.iter().any(|arg| arg == "-colorspace"));
+    }
+
+    #[test]
+    fn build_ffmpeg_args_omits_bt709_output_tags_for_stream_copy() {
+        let mut config = sample_config("mp4", "libx264");
+        config.processing_mode = "copy".to_string();
+        config.hdr_conversion_enabled = true;
+        config.hdr_source_kind = "pq".to_string();
+
+        let args = build_ffmpeg_args("input.mov", "output.mp4", &config, &sample_probe())
+            .expect("arguments should build");
+
+        assert!(!args.iter().any(|arg| arg == "-colorspace"));
     }
 
     #[test]
@@ -2255,6 +2336,31 @@ mod tests {
                 .iter()
                 .any(|arg| arg == "-b:v" || arg == "-maxrate" || arg == "-preset"),
             "目标码率档对 ProRes 也不发：{args:?}"
+        );
+    }
+
+    #[test]
+    fn hdr_auto_pixel_format_guards_x264_profile_args() {
+        // HDR 生效 + 像素格式「自动」：链尾落 10-bit（白名单 10-bit 优先），
+        // x264 8-bit 档位即使残留在配置里也必须不发——守卫读「实际生效」的
+        // 像素格式，`auto` 字面值不失明。
+        let mut config = sample_config("mp4", "libx264");
+        config.hdr_conversion_enabled = true;
+        config.hdr_source_kind = "pq".to_string();
+        config.x264_profile = "high".to_string();
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &config, &sample_probe()).unwrap();
+        assert!(
+            !args.iter().any(|arg| arg == "-profile:v"),
+            "HDR 下落 10-bit，8-bit 档位不得发射：{args:?}"
+        );
+
+        // 同一配置关闭 HDR → 像素格式保持「自动」，档位照发（8-bit 路径）。
+        let mut sdr = config;
+        sdr.hdr_conversion_enabled = false;
+        let args = build_ffmpeg_args("in.mp4", "out.mp4", &sdr, &sample_probe()).unwrap();
+        assert!(
+            args_contains_pair(&args, "-profile:v", "high"),
+            "SDR 下 8-bit 档位正常发射：{args:?}"
         );
     }
 

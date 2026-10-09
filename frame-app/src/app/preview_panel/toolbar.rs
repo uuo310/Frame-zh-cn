@@ -14,8 +14,8 @@ const PREVIEW_TOOLBAR_PADDING: f32 = 4.0;
 const PREVIEW_TOOLBAR_GAP: f32 = 8.0;
 const PREVIEW_TOOLBAR_VERTICAL_SEPARATOR_HEIGHT: f32 = 18.0;
 const PREVIEW_TOOLBAR_VERTICAL_SEPARATOR_WIDTH: f32 = 1.0;
-const PREVIEW_TOOLBAR_BUTTON_COUNT: f32 = 5.0;
-const PREVIEW_TOOLBAR_GAP_COUNT: f32 = 4.0;
+const PREVIEW_TOOLBAR_BUTTON_COUNT: f32 = 6.0;
+const PREVIEW_TOOLBAR_GAP_COUNT: f32 = 5.0;
 
 pub(in crate::app) const fn preview_toolbar_height() -> f32 {
     (PREVIEW_TOOLBAR_PADDING * 2.0)
@@ -41,6 +41,7 @@ pub(in crate::app) fn preview_toolbar(
     let transform_enabled = preview_visual_controls_enabled(state);
     let crop_enabled = transform_enabled && state.crop.has_crop_dimensions;
     let overlay_enabled = transform_enabled && state.availability.overlay_available;
+    let hdr_compare_enabled = transform_enabled && state.hdr_compare_available;
 
     div()
         .absolute()
@@ -147,6 +148,25 @@ pub(in crate::app) fn preview_toolbar(
             )
             .on_click(cx.listener(|root, _: &ClickEvent, window, cx| {
                 if root.trigger_selected_overlay(window, cx) {
+                    cx.notify();
+                }
+            })),
+        )
+        .child(
+            preview_tool_button(
+                "preview-tool-hdr-compare",
+                assets::ICON_SWAP_HORIZONTAL,
+                "原片 / 映射后",
+                state.hdr_compare_source_active,
+                hdr_compare_enabled,
+                state.tooltip_visible_id.as_deref(),
+                TooltipPlacement::Right,
+                palette,
+                window,
+                cx,
+            )
+            .on_click(cx.listener(|root, _: &ClickEvent, _window, cx| {
+                if root.toggle_selected_hdr_preview_compare() {
                     cx.notify();
                 }
             })),

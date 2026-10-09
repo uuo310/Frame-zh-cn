@@ -1498,6 +1498,167 @@ fn display_matrix_rotation_should_produce_portrait_preview_frame() -> TestResult
     Ok(())
 }
 
+#[test]
+#[ignore = "requires FFmpeg/FFprobe; run with --ignored"]
+fn hdr_toggle_on_sdr_source_should_keep_output_bytes_identical() -> TestResult {
+    let tools = Toolchain::discover()?;
+    let sandbox = Sandbox::new("hdr_sdr_passthrough")?;
+    let input = sandbox.path("sdr-source.mp4");
+    generate_h264_aac_source(&tools, &input, 0.5, 160, 90)?;
+
+    let baseline = sandbox.path("baseline.mp4");
+    let base = video_config("mp4", "libx264", "aac");
+    convert(&tools, &input, &baseline, &base)?;
+
+    // SDR 源（kind 保持 sdr）开启「HDR → SDR 转换」：判据不产映射段，
+    // 产物须逐字节一致——防空转防护：开关在非 HDR 源上不得产生任何实际处理。
+    let toggled = sandbox.path("toggled.mp4");
+    let mut with_hdr = base;
+    with_hdr.hdr_conversion_enabled = true;
+    convert(&tools, &input, &toggled, &with_hdr)?;
+
+    let baseline_bytes =
+        fs::read(&baseline).map_err(|error| format!("failed to read baseline: {error}"))?;
+    let toggled_bytes =
+        fs::read(&toggled).map_err(|error| format!("failed to read toggled: {error}"))?;
+    if baseline_bytes != toggled_bytes {
+        return Err(format!(
+            "SDR source output changed with HDR conversion enabled ({} vs {} bytes)",
+            baseline_bytes.len(),
+            toggled_bytes.len()
+        ));
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires FFmpeg/FFprobe; run with --ignored"]
+fn hdr_pq_source_should_tonemap_to_sdr_bt709() -> TestResult {
+    let tools = Toolchain::discover()?;
+    let sandbox = Sandbox::new("hdr_pq_tonemap")?;
+    let input = sandbox.path("pq-source.mp4");
+    generate_hdr_solid_source(&tools, &input, "smpte2084", 160, 90)?;
+
+    // 假源自带标定与 CLL（max-cll=1000,400）：标定进流是断言前提；
+    // CLL 供 tonemap 自动峰值（`ff_determine_signal_peak`）取用，故本测试
+    // 不设显式 peak，走 auto 档。
+    let source = probe_media(&tools, &input)?;
+    assert_eq!(
+        source.color_transfer.as_deref(),
+        Some("smpte2084"),
+        "PQ test source lost its transfer characteristics"
+    );
+    assert_eq!(source.color_primaries.as_deref(), Some("bt2020"));
+
+    let output = sandbox.path("sdr-output.mp4");
+    let mut config = video_config("mp4", "libx264", "aac");
+    config.hdr_conversion_enabled = true;
+    config.hdr_source_kind = "pq".to_string();
+    convert(&tools, &input, &output, &config)?;
+
+    // §5.3 输出色标落地 + 产物可解码。
+    let metadata = probe_media(&tools, &output)?;
+    assert_eq!(metadata.color_transfer.as_deref(), Some("bt709"));
+    assert_eq!(metadata.color_primaries.as_deref(), Some("bt709"));
+    assert_eq!(metadata.color_range.as_deref(), Some("tv"));
+    decode_media(&tools, &output)?;
+
+    // golden：中灰 PQ 源（8-bit 0x808080）经 hable 映射后应保持中性、
+    // 亮度对齐实跑基准 176（本机自带 ffmpeg 实测；容差 ±12 吸收小版本浮动）。
+    let frame = read_rgb_frame(&tools, &output)?;
+    let gray = frame.pixel(80, 45)?;
+    eprintln!("PQ tonemap gray pixel: {gray:?}");
+    assert!(
+        gray.red.abs_diff(gray.green) <= 3 && gray.green.abs_diff(gray.blue) <= 3,
+        "tonemapped gray lost neutrality: {gray:?}"
+    );
+    assert!(
+        gray.red.abs_diff(176) <= 12,
+        "tonemapped gray drifted from golden baseline 176±12: {gray:?}"
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires FFmpeg/FFprobe; run with --ignored"]
+fn hdr_hlg_source_should_convert_to_sdr_smoke() -> TestResult {
+    let tools = Toolchain::discover()?;
+    let sandbox = Sandbox::new("hdr_hlg_smoke")?;
+    let input = sandbox.path("hlg-source.mp4");
+    generate_hdr_solid_source(&tools, &input, "arib-std-b67", 160, 90)?;
+
+    let source = probe_media(&tools, &input)?;
+    assert_eq!(
+        source.color_transfer.as_deref(),
+        Some("arib-std-b67"),
+        "HLG test source lost its transfer characteristics"
+    );
+
+    let output = sandbox.path("sdr-output.mp4");
+    let mut config = video_config("mp4", "libx264", "aac");
+    config.hdr_conversion_enabled = true;
+    config.hdr_source_kind = "hlg".to_string();
+    convert(&tools, &input, &output, &config)?;
+
+    let metadata = probe_media(&tools, &output)?;
+    assert_eq!(metadata.color_transfer.as_deref(), Some("bt709"));
+    decode_media(&tools, &output)?;
+
+    // smoke：映射后画面健全（保持中性、亮度对齐实跑基准 123，容差 ±12）。
+    let frame = read_rgb_frame(&tools, &output)?;
+    let gray = frame.pixel(80, 45)?;
+    eprintln!("HLG tonemap gray pixel: {gray:?}");
+    assert!(
+        gray.red.abs_diff(gray.green) <= 3 && gray.green.abs_diff(gray.blue) <= 3,
+        "HLG output gray lost neutrality: {gray:?}"
+    );
+    assert!(
+        gray.red.abs_diff(123) <= 12,
+        "HLG output drifted from baseline 123±12: {gray:?}"
+    );
+    Ok(())
+}
+
+/// HDR 假源：纯中灰（0x808080）+ x265 标定注入（色彩 + CLL）。
+///
+/// x265 的传输特性**必须**走 `-x265-params`（命令行 `-color_trc` 对 x265 无效，
+/// ffprobe 显示 unknown）；`max-cll` 随流声明内容光级，供 tonemap 自动峰值取用。
+fn generate_hdr_solid_source(
+    tools: &Toolchain,
+    output: &Path,
+    transfer: &str,
+    width: u32,
+    height: u32,
+) -> TestResult {
+    if !encoder_available(tools, "libx265")? {
+        return Err("libx265 is required to build HDR test sources".to_string());
+    }
+    run_tool(
+        &tools.ffmpeg,
+        &args(&[
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-f",
+            "lavfi",
+            "-i",
+            &format!("color=c=0x808080:size={width}x{height}:rate=12:duration=0.5"),
+            "-an",
+            "-c:v",
+            "libx265",
+            "-preset",
+            "ultrafast",
+            "-pix_fmt",
+            "yuv420p10le",
+            "-x265-params",
+            &format!(
+                "colorprim=bt2020:transfer={transfer}:colormatrix=bt2020nc:range=limited:max-cll=1000,400"
+            ),
+            &path_arg(output),
+        ]),
+    )
+}
+
 fn convert(
     tools: &Toolchain,
     input: &Path,
@@ -1606,6 +1767,11 @@ fn base_config(container: &str, video_codec: &str) -> ConversionConfig {
         videotoolbox_allow_sw: false,
         hw_decode: false,
         pixel_format: "auto".to_string(),
+        hdr_conversion_enabled: false,
+        hdr_tonemap_algorithm: "hable".to_string(),
+        hdr_source_peak: None,
+        hdr_source_override: "auto".to_string(),
+        hdr_source_kind: "sdr".to_string(),
         image_jpeg_quality: 85,
         image_jpeg_huffman: "optimal".to_string(),
         image_webp_lossless: false,
