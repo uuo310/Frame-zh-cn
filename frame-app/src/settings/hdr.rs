@@ -129,13 +129,30 @@ fn source_attributes_suffix(metadata: Option<&SourceMetadata>) -> String {
     if let Some(pixel_format) = metadata.pixel_format.as_deref() {
         let pixel_format = pixel_format.trim();
         if !pixel_format.is_empty() {
-            parts.push(if pixel_format.contains("10") { "10-bit" } else { "8-bit" }.to_string());
+            parts.push(pixel_depth_label(pixel_format).to_string());
         }
     }
     if parts.is_empty() {
         String::new()
     } else {
         format!(" · {}", parts.join(" · "))
+    }
+}
+
+/// 探测像素格式 → 位深显示标签（10 / 12 / 8 三档）。
+///
+/// 按 `10le`／`10be`／`12le`／`12be` 后缀精确匹配——防 `contains("10")` 的
+/// 子串碰撞（`yuv410p` 旧格式会被误判为 10-bit）；10-bit 匹配同时覆盖
+/// `p010le`（P010 半平面）、`x2rgb10le`（打包 RGB）等以 `10le` 结尾的交叉族。
+/// HDR 源现实谱系（10-bit 主、12-bit 偶见）内无更高位深分发格式，其余落 8-bit。
+fn pixel_depth_label(pixel_format: &str) -> &'static str {
+    let lower = pixel_format.trim().to_ascii_lowercase();
+    if lower.ends_with("10le") || lower.ends_with("10be") {
+        "10-bit"
+    } else if lower.ends_with("12le") || lower.ends_with("12be") {
+        "12-bit"
+    } else {
+        "8-bit"
     }
 }
 
@@ -474,6 +491,33 @@ mod tests {
             hdr_source_status(&hdr_config(), Some(&eight_bit)).text,
             "HDR10 (PQ) · BT.2020 · 8-bit"
         );
+    }
+
+    #[test]
+    fn status_suffix_depth_label_matches_suffixes_precisely() {
+        // 12-bit 源：按 12le 后缀标 12-bit（旧 contains("10") 会错标 8-bit）。
+        let twelve_bit = metadata_with("bt2020", "yuv420p12le");
+        assert_eq!(
+            hdr_source_status(&hdr_config(), Some(&twelve_bit)).text,
+            "HDR10 (PQ) · BT.2020 · 12-bit"
+        );
+
+        // 子串碰撞回归：yuv410p（4:1:0 8-bit 旧格式）不得被 contains("10") 骗成 10-bit。
+        let four_one_zero = metadata_with("bt2020", "yuv410p");
+        assert_eq!(
+            hdr_source_status(&hdr_config(), Some(&four_one_zero)).text,
+            "HDR10 (PQ) · BT.2020 · 8-bit"
+        );
+
+        // 以 "10le"／"10be" 结尾的交叉族均为 10-bit（P010 半平面、打包 RGB、大端）。
+        for pixel_format in ["p010le", "x2rgb10le", "yuv420p10be"] {
+            let metadata = metadata_with("bt2020", pixel_format);
+            assert_eq!(
+                hdr_source_status(&hdr_config(), Some(&metadata)).text,
+                "HDR10 (PQ) · BT.2020 · 10-bit",
+                "{pixel_format} 应标 10-bit"
+            );
+        }
     }
 
     #[test]
